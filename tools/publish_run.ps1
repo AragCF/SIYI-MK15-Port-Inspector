@@ -117,10 +117,10 @@ if ($HasStagedChanges) {
         Log-Line 'git commit failed. Run data remains local or staged.'
         exit 5
     }
-    Log-Line ('Created diagnostic commit: ' + $Message)
+    Write-Host ('Created diagnostic commit: ' + $Message)
 }
 else {
-    Log-Line 'No new run files to commit. A push will still be attempted.'
+    Write-Host 'No new run files to commit. A push will still be attempted.'
 }
 
 & git -C $Root push origin HEAD:main
@@ -129,24 +129,24 @@ if ($LASTEXITCODE -eq 0) {
     exit 0
 }
 
-Log-Line 'Initial git push failed.'
+Write-Host 'Initial git push failed.' -ForegroundColor Yellow
 
 if ($UnrelatedDirty.Count -gt 0) {
-    Log-Line 'Automatic rebase retry was skipped because unrelated local changes are present.'
-    Log-Line 'Run PUBLISH_LAST_RUN.bat later after resolving local changes, network or authentication.'
+    Write-Host 'Automatic rebase retry was skipped because unrelated local changes are present.' -ForegroundColor Yellow
+    Write-Host 'Run PUBLISH_LAST_RUN.bat later after resolving local changes, network or authentication.' -ForegroundColor Yellow
     exit 6
 }
 
-Log-Line 'No unrelated local changes were detected. Trying fetch/rebase and one more push.'
+Write-Host 'No unrelated local changes were detected. Trying fetch/rebase and one more push.'
 & git -C $Root fetch origin main
 if ($LASTEXITCODE -ne 0) {
-    Log-Line 'git fetch failed.'
+    Write-Host 'git fetch failed.' -ForegroundColor Yellow
     exit 7
 }
 
 & git -C $Root rebase origin/main
 if ($LASTEXITCODE -ne 0) {
-    Log-Line 'git rebase failed. Resolve the repository state manually, then run PUBLISH_LAST_RUN.bat.'
+    Write-Host 'git rebase failed. Resolve the repository state manually, then run PUBLISH_LAST_RUN.bat.' -ForegroundColor Yellow
     exit 8
 }
 
@@ -156,5 +156,5 @@ if ($LASTEXITCODE -eq 0) {
     exit 0
 }
 
-Log-Line 'Second git push failed. Run data and its local commit are preserved.'
+Write-Host 'Second git push failed. Run data and its local commit are preserved.' -ForegroundColor Yellow
 exit 9
