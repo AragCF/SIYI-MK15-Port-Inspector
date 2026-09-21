@@ -21,8 +21,9 @@ public final class UsbSerialCp210x {
     }
 
     private static final int SILABS_VENDOR_ID = 0x10C4;
+    private static final int USB_RECIP_INTERFACE = 0x01; // bmRequestType recipient: interface
     private static final int REQTYPE_HOST_TO_INTERFACE = UsbConstants.USB_TYPE_VENDOR
-            | UsbConstants.USB_RECIP_INTERFACE | UsbConstants.USB_DIR_OUT;
+            | USB_RECIP_INTERFACE | UsbConstants.USB_DIR_OUT;
     private static final int CP210X_IFC_ENABLE = 0x00;
     private static final int CP210X_SET_LINE_CTL = 0x03;
     private static final int CP210X_SET_MHS = 0x07;
