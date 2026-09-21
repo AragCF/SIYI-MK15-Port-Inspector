@@ -1,51 +1,71 @@
 # SIYI MK15 Port Inspector
 
-Диагностическое Android-приложение для **SIYI MK15**. Первая практическая цель — определить, через какой доступный Android-приложению интерфейс приходит левый верхний трёхпозиционный переключатель **SA**, найти его фактический коммуникационный канал и показывать живое значение на экране.
+Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Текущая версия: **1.0.0**.
+Current version: 1.0.0.
 
-## Рабочий процесс
+## Repository workflow
 
-Основной источник исходников теперь — этот репозиторий. Архивы между итерациями не нужны.
+This repository is now the primary source. There is no need to exchange source ZIP archives between iterations.
 
-Локальный каталог на Windows:
+Local Windows directory:
 
-```text
-C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector
-```
+    C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector
 
-Первое получение проекта:
+First clone:
 
-```bat
-cd /d "C:\54\Projects\!0724 - Coating Robot"
-git clone https://github.com/AragCF/SIYI-MK15-Port-Inspector.git
-cd /d "C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector"
-```
+    cd /d "C:\54\Projects\!0724 - Coating Robot"
+    git clone https://github.com/AragCF/SIYI-MK15-Port-Inspector.git
+    cd /d "C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector"
 
-Дальнейшее обновление:
+Update before the next test:
 
-```bat
-cd /d "C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector"
-git pull
-```
+    cd /d "C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector"
+    git pull
 
-## Сборка APK
+## Windows build
 
-При установленной Android Studio:
+Run:
 
-```bat
-cd /d "C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector"
-set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
-set "ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\Sdk"
-BUILD_WINDOWS.bat
-```
+    BUILD_WINDOWS.bat
 
-Готовый APK после локальной сборки:
+The launcher and all PowerShell scripts used from Windows are intentionally ASCII-only. This avoids the Windows PowerShell 5.1 UTF-8-without-BOM parsing problem that was seen in the first local run.
 
-```text
-out\MK15PortInspector-1.0.0-debug.apk
-```
+The script:
 
-Подробности исследования, безопасности, проверки SA и диагностики находятся в `00_README_RU.md`, `01_FINDINGS.md`, `02_TASK_SCOPE.md`, `03_TESTS.md` и `04_PROGRESS.md`.
+1. creates a unique runs/build_YYYYMMDD_HHMMSS directory before the actual build starts;
+2. starts a transcript before loading the main build script;
+3. runs the SIYI protocol self-test;
+4. builds the debug APK;
+5. copies the APK and SHA256 into the run folder when available;
+6. stores the result code and a short Git/OS snapshot;
+7. commits only that run directory and attempts to push it to origin/main even when the build failed.
 
-> Первую проверку RC-каналов проводить на столе, не в полёте и без работающей силовой части.
+The build output is also copied to:
+
+    out\MK15PortInspector-1.0.0-debug.apk
+
+If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
+
+    PUBLISH_LAST_RUN.bat
+
+The publishing script never runs a broad git add. It adds only the current runs/<id> directory, so unrelated local source edits are not silently committed.
+
+## Protocol self-test
+
+RUN_PROTOCOL_SELFTEST.bat uses the same diagnostic run/publish mechanism.
+
+## GitHub Actions
+
+Every source/script change on main is validated on a Windows runner:
+
+- Windows PowerShell 5.1 parses all tools/*.ps1 scripts;
+- the SIYI protocol self-test is executed;
+- the Android project is built with Gradle;
+- the debug APK is uploaded as a GitHub Actions artifact.
+
+Commits that contain only runs/** diagnostics do not start a new CI build.
+
+Detailed project notes: 00_README_RU.md, 01_FINDINGS.md, 02_TASK_SCOPE.md, 03_TESTS.md and 04_PROGRESS.md.
+
+Safety: first RC-channel tests must be performed on the bench, not in flight and without an active propulsion system.

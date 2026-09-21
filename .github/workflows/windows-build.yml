@@ -3,6 +3,8 @@ name: Windows APK build
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - "runs/**"
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -21,6 +23,22 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Check Windows PowerShell 5.1 script syntax
+        shell: powershell
+        run: |
+          $failed = $false
+          Get-ChildItem -Path "tools" -Filter "*.ps1" | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              Write-Host ("PowerShell parse errors in " + $_.FullName)
+              $errors | Format-List
+              $failed = $true
+            }
+          }
+          if ($failed) { throw "PowerShell syntax validation failed" }
 
       - name: Android SDK
         uses: android-actions/setup-android@v3
