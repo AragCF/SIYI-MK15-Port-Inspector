@@ -1,0 +1,80 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260922001814
+Username: DJ-ANDREY-ISAK\Andrey
+RunAs User: DJ-ANDREY-ISAK\Andrey
+Configuration Name: 
+Machine: DJ-ANDREY-ISAK (Microsoft Windows NT 10.0.19045.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\tools\run_build.ps1
+Process ID: 15764
+PSVersion: 5.1.19041.4648
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.19041.4648
+BuildVersion: 10.0.19041.4648
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Run directory: C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\runs\build_20260922_001814
+Console output, build artifacts and a short environment snapshot are preserved even on failure.
+
+=== MK15 Port Inspector: Windows build ===
+Project: C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector
+JAVA_HOME=C:\Program Files\OpenLogic\jdk-21.0.4.7-hotspot\
+openjdk version "21.0.4" 2024-07-16
+OpenJDK Runtime Environment OpenLogic-OpenJDK (build 21.0.4+7-adhoc.Administrator.jdk21u)
+OpenJDK 64-Bit Server VM OpenLogic-OpenJDK (build 21.0.4+7-adhoc.Administrator.jdk21u, mixed mode, sharing)
+ANDROID_SDK_ROOT=C:\54\Dist\Progr\Android_Tools
+
+Running SIYI protocol self-test...
+
+OK: 0x42 4Hz request = 55 66 01 01 00 00 00 42 02 B5 C0
+OK: 0x42 OFF request = 55 66 01 01 00 00 00 42 00 F7 E0
+OK: 0x48 mapping request = 55 66 01 00 00 00 00 48 89 1D
+OK: type=5 entity_id=0 -> SA
+OK: official 0x48 response parsed; CH5 -> SA
+OK: 0x42 parser decoded 16 channels; CH5=1050
+ALL PROTOCOL SELF-TESTS PASSED
+Using Gradle from PATH: c:\54\Dist\Progr\Android_Tools\gradle\bin\gradle.bat
+
+Running Android debug build...
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#s
+ec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+Configuration on demand is an incubating feature.
+
+> Task :app:compileDebugJavaWithJavac
+Java compiler version 21 has deprecated support for compiling with source/target version 8.
+Try one of the following options:
+    1. [Recommended] Use Java toolchain with a lower language version
+    2. Set a higher source/target version
+    3. Use a lower version of the JDK running the build (if you're not using Java toolchain)
+For more details on how to configure these settings, see https://developer.android.com/build/jdks.
+To suppress this warning, set android.javaCompile.suppressSourceTargetDeprecationWarning=true in gradle.properties.
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+Note: C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\app\src\main\java\com\mk15\portinspector\MainActivity.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+3 warnings
+
+[Incubating] Problems report is available at: file:///C:/54/Projects/!0724%20-%20Coating%20Robot/SIYI-MK15-Port-Inspector/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 2m 44s
+32 actionable tasks: 32 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.4.1/userguide/configuration_cache_enabling.html
+
+BUILD SUCCESSFUL.
+APK: C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\out\MK15PortInspector-1.0.0-debug.apk
+SHA256: F8651F2C99E3C4F9962E28565D2BD238BFEFF7C0BFC86CDC78B6CD86D12ADCDD
+**********************
+Windows PowerShell transcript end
+End time: 20260922002106
+**********************
