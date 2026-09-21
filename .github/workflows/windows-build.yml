@@ -1,0 +1,64 @@
+name: Windows APK build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 34
+        shell: pwsh
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: SIYI protocol self-test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ".host-test-build" | Out-Null
+          javac -encoding UTF-8 -d ".host-test-build" "app/src/main/java/com/mk15/portinspector/SiyiProtocol.java" "host-tests/ProtocolSelfTest.java"
+          java -cp ".host-test-build" ProtocolSelfTest
+
+      - name: Build debug APK
+        shell: pwsh
+        run: |
+          gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "out" | Out-Null
+          Copy-Item "app/build/outputs/apk/debug/app-debug.apk" "out/MK15PortInspector-1.0.0-debug.apk"
+          Get-FileHash -Algorithm SHA256 "out/MK15PortInspector-1.0.0-debug.apk" | Format-List | Out-File "out/SHA256.txt"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MK15PortInspector-1.0.0-debug
+          path: |
+            out/MK15PortInspector-1.0.0-debug.apk
+            out/SHA256.txt
+          if-no-files-found: error

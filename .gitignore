@@ -1,0 +1,9 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+.tools/
+.host-test-build/
+out/*.apk
+build_windows.log
+*.iml
