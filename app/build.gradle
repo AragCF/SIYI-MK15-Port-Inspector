@@ -10,8 +10,8 @@ android {
         applicationId 'com.mk15.portinspector'
         minSdk 23
         targetSdk 28
-        versionCode 10
-        versionName '1.1.0'
+        versionCode 20
+        versionName '1.2.0'
     }
 
     buildTypes {

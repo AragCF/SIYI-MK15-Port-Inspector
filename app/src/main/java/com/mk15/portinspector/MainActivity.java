@@ -1,16 +1,23 @@
 package com.mk15.portinspector;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.MediaScannerConnection;
+import android.net.Uri;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.InputDevice;
@@ -29,6 +36,7 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
@@ -52,7 +60,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class MainActivity extends Activity implements SiyiProtocol.FrameListener {
     private static final String ACTION_USB_PERMISSION = "com.mk15.portinspector.USB_PERMISSION";
     private static final int CHANNEL_COUNT = 16;
-    private static final int LOG_LIMIT = 96_000;
+    private static final int LOG_LIMIT = 128_000;
+    private static final int REQUEST_CREATE_REPORT_FILE = 3101;
+    private static final int REQUEST_WRITE_STORAGE = 3102;
+    private static final String REPORT_ENDPOINT = "https://thesystem.pro/?action=siyi_receive";
     private static final String TRANSPORT_AUTO = "AUTO / все безопасные";
     private static final String TRANSPORT_USB = "USB COM / CP210x";
     private static final String TRANSPORT_UDP = "UDP";
@@ -86,6 +97,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private TextView logText;
     private TextView scanText;
     private TextView finderText;
+    private TextView reportText;
     private EditText baudEdit;
     private EditText udpHostEdit;
     private EditText udpPortEdit;
@@ -95,7 +107,11 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private ResearchTransports researchTransports;
 
     private final StringBuilder sessionLog = new StringBuilder(16_384);
+    private final StringBuilder finderHistory = new StringBuilder(8_192);
     private File runtimeLogFile;
+    private volatile File lastReportZip;
+    private volatile File pendingDownloadReport;
+    private volatile File pendingPickerReport;
     private long usbRxBytes;
     private int usbRxChunks;
     private long usbTxBytes;
@@ -152,7 +168,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         setContentView(buildUi());
         initRuntimeLog();
         applyDefaultMappingPreview();
-        appendLog("MK15 Port Inspector 1.1.0 запущен.");
+        appendLog("MK15 Port Inspector 1.2.0 запущен.");
         appendLog("Режим исследования поддерживает USB COM, UDP, Bluetooth SPP, /dev/ttyHS0 и Android Input.");
         appendLog("Важно: поток 0x42 использует тот же канал связи, что телеметрия. Проверять только на столе, не в полёте.");
         scanPorts();
@@ -263,7 +279,9 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         commands.addView(button("RC 4 Гц 0x42", v -> startRcStream()));
         commands.addView(button("СТОП RC", v -> stopRcStream(true)));
         commands.addView(button("Версии 0x40/0x47", v -> requestInfo()));
-        commands.addView(button("Сохранить отчёт", v -> saveReport()));
+        commands.addView(button("ZIP → Download", v -> saveReportToDownloads()));
+        commands.addView(button("ZIP → флешка/файл…", v -> saveReportWithPicker()));
+        commands.addView(button("ZIP → thesystem", v -> uploadReportToThesystem()));
         commands.addView(button("Очистить журнал", v -> clearLog()));
         commandScroller.addView(commands);
         root.addView(commandScroller, new LinearLayout.LayoutParams(
@@ -280,6 +298,11 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         finderText.setPadding(dp(8), dp(4), dp(8), dp(4));
         finderText.setBackgroundColor(Color.rgb(227, 242, 253));
         root.addView(finderText, lpMatchWrap());
+
+        reportText = text("Отчёт ZIP: ещё не сформирован", 13, true);
+        reportText.setPadding(dp(8), dp(4), dp(8), dp(4));
+        reportText.setBackgroundColor(Color.rgb(232, 245, 233));
+        root.addView(reportText, lpMatchWrap());
 
         saText = text("SA: заводской mapping = CH5; живые данные ещё не получены", 20, true);
         saText.setPadding(dp(8), dp(5), dp(8), dp(5));
@@ -721,6 +744,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 Map<String, String> snapshot = captureProbeSnapshot();
                 probeDiff.setBaseline(snapshot);
                 appendLog("Switch Finder: база снята (" + reason + "), ключей=" + snapshot.size());
+                appendFinderHistory("BASE " + reason + " keys=" + snapshot.size());
                 runOnUiThread(() -> finderText.setText(
                         "База снята: " + snapshot.size()
                                 + " источников/значений. Переключите SA в другое положение и нажмите «сравнить»."
@@ -745,6 +769,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 ProbeDiffEngine.Result result = probeDiff.compare(snapshot);
                 String formatted = formatFinderResult(result);
                 appendLog("Switch Finder round " + result.round + ": changed=" + result.changes.size());
+                appendFinderHistory(formatted);
                 runOnUiThread(() -> finderText.setText(formatted));
             } catch (Throwable t) {
                 appendLog("Switch Finder: сравнение не удалось — " + stackSummary(t));
@@ -787,8 +812,21 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
 
     private void resetFinder() {
         probeDiff.reset();
+        synchronized (finderHistory) {
+            finderHistory.setLength(0);
+        }
         finderText.setText("Поиск сброшен. Нажмите «1. Снять базу», затем переключите SA.");
         appendLog("Switch Finder: поиск сброшен.");
+    }
+
+    private void appendFinderHistory(String text) {
+        String stamp = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
+        synchronized (finderHistory) {
+            finderHistory.append(stamp).append("  ").append(text == null ? "" : text).append('\n');
+            if (finderHistory.length() > 64_000) {
+                finderHistory.delete(0, finderHistory.length() - 64_000);
+            }
+        }
     }
 
     private void requestMapping() {
@@ -1069,30 +1107,378 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         return super.dispatchGenericMotionEvent(event);
     }
 
-    private void saveReport() {
-        final String scan = scanText == null ? "" : scanText.getText().toString();
-        final String log;
+    private interface ReportReady {
+        void onReady(File zip);
+    }
+
+    private void saveReportToDownloads() {
+        buildReportAsync("save-to-download", this::copyReportToDownloads);
+    }
+
+    private void saveReportWithPicker() {
+        buildReportAsync("save-with-file-picker", zip -> {
+            pendingPickerReport = zip;
+            try {
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("application/zip");
+                intent.putExtra(Intent.EXTRA_TITLE, zip.getName());
+                startActivityForResult(intent, REQUEST_CREATE_REPORT_FILE);
+            } catch (Throwable t) {
+                pendingPickerReport = null;
+                appendLog("Файловый выбор недоступен: " + stackSummary(t));
+                reportText.setText("Не удалось открыть файловый выбор. Используйте ZIP → Download.");
+                Toast.makeText(this,
+                        "Файловый выбор недоступен. Используйте ZIP → Download.",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void uploadReportToThesystem() {
+        buildReportAsync("upload-to-thesystem", zip -> {
+            reportText.setText("Отчёт: отправляю " + zip.getName() + " в thesystem…");
+            worker.submit(() -> {
+                try {
+                    Map<String, String> fields = new LinkedHashMap<>();
+                    fields.put("report_id", zip.getName());
+                    fields.put("app_version", "1.2.0");
+                    fields.put("package", getPackageName());
+                    fields.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                    fields.put("android", Build.VERSION.RELEASE + " / API " + Build.VERSION.SDK_INT);
+                    fields.put("transport", currentTransport);
+                    fields.put("sa_channel", String.valueOf(saChannelIndex + 1));
+                    fields.put("finder_rounds", String.valueOf(probeDiff.getRounds()));
+
+                    ReportTools.UploadResult result =
+                            ReportTools.uploadMultipart(REPORT_ENDPOINT, zip, fields);
+
+                    String response = result.responseBody == null ? "" : result.responseBody.trim();
+                    if (response.length() > 600) response = response.substring(0, 600) + "...";
+
+                    final String visibleResponse = response;
+                    appendLog("thesystem upload: HTTP " + result.statusCode
+                            + (visibleResponse.isEmpty() ? "" : " response=" + visibleResponse));
+
+                    runOnUiThread(() -> {
+                        if (result.isSuccess()) {
+                            reportText.setBackgroundColor(Color.rgb(200, 230, 201));
+                            reportText.setText("Отчёт отправлен в thesystem: HTTP "
+                                    + result.statusCode
+                                    + (visibleResponse.isEmpty() ? "" : " — " + visibleResponse));
+                        } else {
+                            reportText.setBackgroundColor(Color.rgb(255, 224, 178));
+                            reportText.setText("thesystem не принял отчёт: HTTP "
+                                    + result.statusCode
+                                    + (visibleResponse.isEmpty() ? "" : " — " + visibleResponse));
+                        }
+                    });
+                } catch (Throwable t) {
+                    appendLog("Отправка в thesystem не удалась: " + stackSummary(t));
+                    runOnUiThread(() -> {
+                        reportText.setBackgroundColor(Color.rgb(255, 205, 210));
+                        reportText.setText("Ошибка отправки в thesystem: " + stackSummary(t));
+                    });
+                }
+            });
+        });
+    }
+
+    private void buildReportAsync(String reason, ReportReady callback) {
+        final String scanOnScreen = scanText == null ? "" : scanText.getText().toString();
+        final String finderCurrent = finderText == null ? "" : finderText.getText().toString();
+        final String statusCurrent = statusText == null ? "" : statusText.getText().toString();
+        final String saCurrent = saText == null ? "" : saText.getText().toString();
+        final String channelTable = captureChannelTableText();
+
+        final String session;
         synchronized (sessionLog) {
-            log = sessionLog.toString();
+            session = sessionLog.toString();
         }
+
+        final String finderLog;
+        synchronized (finderHistory) {
+            finderLog = finderHistory.toString();
+        }
+
+        reportText.setBackgroundColor(Color.rgb(232, 245, 233));
+        reportText.setText("Отчёт: формирую ZIP…");
+
         worker.submit(() -> {
             try {
-                File dir = getExternalFilesDir(null);
-                if (dir == null) dir = getFilesDir();
-                if (!dir.exists() && !dir.mkdirs()) throw new Exception("Не удалось создать каталог " + dir);
-                String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-                File file = new File(dir, "MK15_PortInspector_" + ts + ".txt");
-                try (FileWriter fw = new FileWriter(file)) {
-                    fw.write("MK15 Port Inspector 1.1.0\n\n");
-                    fw.write(scan);
-                    fw.write("\n\n=== Журнал сеанса ===\n");
-                    fw.write(log);
+                Map<String, String> dynamic = captureProbeSnapshot();
+                String fullScan;
+                try {
+                    fullScan = SystemScanner.collect(getApplicationContext());
+                } catch (Throwable t) {
+                    fullScan = "SystemScanner failed: " + stackSummary(t);
                 }
-                appendLog("Отчёт сохранён: " + file.getAbsolutePath());
-                runOnUiThread(() -> Toast.makeText(this,
-                        "Отчёт сохранён:\n" + file.getAbsolutePath(), Toast.LENGTH_LONG).show());
+
+                String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+                String fileName = "MK15_Report_" + ts + "_v1.2.0.zip";
+
+                File base = getExternalFilesDir(null);
+                if (base == null) base = getFilesDir();
+                File reportsDir = new File(base, "reports");
+
+                Map<String, byte[]> entries = new LinkedHashMap<>();
+                entries.put("README.txt", ReportTools.utf8(buildReportReadme()));
+                entries.put("summary.txt", ReportTools.utf8(buildReportSummary(
+                        reason, statusCurrent, saCurrent, fileName)));
+                entries.put("screen/channels.txt", ReportTools.utf8(channelTable));
+                entries.put("screen/switch_finder_current.txt", ReportTools.utf8(finderCurrent));
+                entries.put("switch_finder/history.txt", ReportTools.utf8(finderLog));
+                entries.put("scan/screen_scan.txt", ReportTools.utf8(scanOnScreen));
+                entries.put("scan/full_scan.txt", ReportTools.utf8(fullScan));
+                entries.put("state/dynamic_snapshot.txt", ReportTools.utf8(mapToText(dynamic)));
+                entries.put("state/mapping.txt", ReportTools.utf8(buildMappingText()));
+                entries.put("logs/session.log", ReportTools.utf8(session));
+
+                if (runtimeLogFile != null && runtimeLogFile.exists()) {
+                    entries.put("logs/runtime.log", ReportTools.readFile(runtimeLogFile));
+                }
+
+                File zip = ReportTools.createZip(reportsDir, fileName, entries);
+                lastReportZip = zip;
+
+                appendLog("ZIP-отчёт сформирован: " + zip.getAbsolutePath()
+                        + " size=" + zip.length());
+
+                runOnUiThread(() -> {
+                    reportText.setBackgroundColor(Color.rgb(200, 230, 201));
+                    reportText.setText("ZIP готов: " + zip.getAbsolutePath()
+                            + " (" + zip.length() + " байт)");
+                    if (callback != null) callback.onReady(zip);
+                });
             } catch (Throwable t) {
-                appendLog("Не удалось сохранить отчёт: " + stackSummary(t));
+                appendLog("Не удалось сформировать ZIP-отчёт: " + stackSummary(t));
+                runOnUiThread(() -> {
+                    reportText.setBackgroundColor(Color.rgb(255, 205, 210));
+                    reportText.setText("Ошибка ZIP-отчёта: " + stackSummary(t));
+                });
+            }
+        });
+    }
+
+    private String captureChannelTableText() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < CHANNEL_COUNT; i++) {
+            TextView row = channelRows[i];
+            sb.append(row == null ? ("CH" + (i + 1)) : row.getText().toString()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private String buildMappingText() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("mapping_received=").append(mappingReceived).append('\n');
+        sb.append("sa_channel=").append(saChannelIndex + 1).append('\n');
+        for (int i = 0; i < CHANNEL_COUNT; i++) {
+            sb.append("CH").append(i + 1)
+                    .append(" type=").append(mappingType[i])
+                    .append(" entity=").append(mappingEntity[i])
+                    .append(" name=").append(mappedName(i))
+                    .append(" value=").append(channelValue[i])
+                    .append('\n');
+        }
+        return sb.toString();
+    }
+
+    private String buildReportSummary(
+            String reason, String status, String sa, String fileName) {
+        return "report_format=1\n"
+                + "app=MK15 Port Inspector\n"
+                + "app_version=1.2.0\n"
+                + "package=" + getPackageName() + "\n"
+                + "created_at=" + new SimpleDateFormat(
+                        "yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US).format(new Date()) + "\n"
+                + "reason=" + reason + "\n"
+                + "file_name=" + fileName + "\n"
+                + "manufacturer=" + Build.MANUFACTURER + "\n"
+                + "model=" + Build.MODEL + "\n"
+                + "product=" + Build.PRODUCT + "\n"
+                + "device=" + Build.DEVICE + "\n"
+                + "hardware=" + Build.HARDWARE + "\n"
+                + "android=" + Build.VERSION.RELEASE + "\n"
+                + "api=" + Build.VERSION.SDK_INT + "\n"
+                + "transport=" + currentTransport + "\n"
+                + "status=" + status + "\n"
+                + "sa=" + sa + "\n"
+                + "finder_rounds=" + probeDiff.getRounds() + "\n"
+                + "upload_endpoint=" + REPORT_ENDPOINT + "\n";
+    }
+
+    private String buildReportReadme() {
+        return "MK15 Port Inspector diagnostic report ZIP\n\n"
+                + "Created entirely on the MK15 without ADB.\n"
+                + "The working ZIP is kept under the app external files/reports directory.\n"
+                + "ZIP → Download copies it to Download/MK15PortInspector for File Explorer and adb pull.\n"
+                + "ZIP → флешка/файл opens Android's file picker; select a USB flash drive if it is mounted.\n"
+                + "ZIP → thesystem POSTs multipart/form-data to " + REPORT_ENDPOINT + ".\n\n"
+                + "Upload contract:\n"
+                + "  multipart file field: report (application/zip)\n"
+                + "  text fields: report_id, app_version, package, device, android, transport, "
+                + "sa_channel, finder_rounds\n";
+    }
+
+    private String mapToText(Map<String, String> map) {
+        StringBuilder sb = new StringBuilder();
+        if (map == null) return "";
+        for (Map.Entry<String, String> e : new TreeMap<>(map).entrySet()) {
+            sb.append(e.getKey()).append('=')
+                    .append(e.getValue() == null ? "" : e.getValue())
+                    .append('\n');
+        }
+        return sb.toString();
+    }
+
+    private void copyReportToDownloads(File zip) {
+        if (zip == null || !zip.exists()) return;
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            worker.submit(() -> copyReportToDownloadsMediaStore(zip));
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingDownloadReport = zip;
+            requestPermissions(
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_WRITE_STORAGE);
+            return;
+        }
+
+        worker.submit(() -> copyReportToDownloadsLegacy(zip));
+    }
+
+    private void copyReportToDownloadsLegacy(File zip) {
+        try {
+            File downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS);
+            File dir = new File(downloads, "MK15PortInspector");
+            File target = new File(dir, zip.getName());
+            ReportTools.copyFile(zip, target);
+            MediaScannerConnection.scanFile(
+                    this,
+                    new String[]{target.getAbsolutePath()},
+                    new String[]{"application/zip"},
+                    null);
+
+            appendLog("ZIP скопирован в Download: " + target.getAbsolutePath());
+            runOnUiThread(() -> {
+                reportText.setBackgroundColor(Color.rgb(200, 230, 201));
+                reportText.setText("Отчёт сохранён: " + target.getAbsolutePath());
+                Toast.makeText(this,
+                        "Готово:\n" + target.getAbsolutePath(),
+                        Toast.LENGTH_LONG).show();
+            });
+        } catch (Throwable t) {
+            appendLog("Не удалось сохранить ZIP в Download: " + stackSummary(t));
+            runOnUiThread(() -> {
+                reportText.setBackgroundColor(Color.rgb(255, 205, 210));
+                reportText.setText("Ошибка сохранения в Download: " + stackSummary(t));
+            });
+        }
+    }
+
+    private void copyReportToDownloadsMediaStore(File zip) {
+        Uri item = null;
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, zip.getName());
+            values.put(MediaStore.MediaColumns.MIME_TYPE, "application/zip");
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH,
+                    Environment.DIRECTORY_DOWNLOADS + "/MK15PortInspector");
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+            item = getContentResolver().insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (item == null) throw new Exception("MediaStore insert returned null");
+
+            try (OutputStream out = getContentResolver().openOutputStream(item, "w")) {
+                if (out == null) throw new Exception("MediaStore output stream is null");
+                ReportTools.copyToStream(zip, out);
+            }
+
+            ContentValues done = new ContentValues();
+            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(item, done, null, null);
+
+            final Uri saved = item;
+            appendLog("ZIP сохранён в Download/MK15PortInspector через MediaStore: " + saved);
+            runOnUiThread(() -> {
+                reportText.setBackgroundColor(Color.rgb(200, 230, 201));
+                reportText.setText("Отчёт сохранён в Download/MK15PortInspector: "
+                        + zip.getName());
+            });
+        } catch (Throwable t) {
+            if (item != null) {
+                try { getContentResolver().delete(item, null, null); } catch (Throwable ignored) {}
+            }
+            appendLog("MediaStore Download failed: " + stackSummary(t));
+            runOnUiThread(() -> {
+                reportText.setBackgroundColor(Color.rgb(255, 205, 210));
+                reportText.setText("Ошибка сохранения в Download: " + stackSummary(t));
+            });
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_WRITE_STORAGE) return;
+
+        File zip = pendingDownloadReport;
+        pendingDownloadReport = null;
+
+        if (grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && zip != null) {
+            worker.submit(() -> copyReportToDownloadsLegacy(zip));
+        } else {
+            reportText.setBackgroundColor(Color.rgb(255, 224, 178));
+            reportText.setText("Нет разрешения на Download. Используйте «ZIP → флешка/файл…».");
+            Toast.makeText(this,
+                    "Нет разрешения на общую память. Можно сохранить через файловый выбор.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_CREATE_REPORT_FILE) return;
+
+        final File zip = pendingPickerReport;
+        pendingPickerReport = null;
+
+        if (resultCode != RESULT_OK || data == null || data.getData() == null || zip == null) {
+            appendLog("Сохранение ZIP через файловый выбор отменено.");
+            return;
+        }
+
+        final Uri uri = data.getData();
+        worker.submit(() -> {
+            try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+                if (out == null) throw new Exception("ContentResolver returned null stream");
+                ReportTools.copyToStream(zip, out);
+                appendLog("ZIP сохранён через файловый выбор: " + uri);
+                runOnUiThread(() -> {
+                    reportText.setBackgroundColor(Color.rgb(200, 230, 201));
+                    reportText.setText("Отчёт сохранён в выбранное место: " + zip.getName());
+                    Toast.makeText(this,
+                            "Отчёт сохранён в выбранное место.",
+                            Toast.LENGTH_LONG).show();
+                });
+            } catch (Throwable t) {
+                appendLog("Сохранение ZIP через файловый выбор не удалось: " + stackSummary(t));
+                runOnUiThread(() -> {
+                    reportText.setBackgroundColor(Color.rgb(255, 205, 210));
+                    reportText.setText("Ошибка сохранения файла: " + stackSummary(t));
+                });
             }
         });
     }
@@ -1104,7 +1490,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             if (!dir.exists()) dir.mkdirs();
             runtimeLogFile = new File(dir, "MK15_PortInspector_runtime.log");
             try (FileWriter fw = new FileWriter(runtimeLogFile, false)) {
-                fw.write("MK15 Port Inspector 1.1.0 runtime log\n");
+                fw.write("MK15 Port Inspector 1.2.0 runtime log\n");
                 fw.write("Started: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date()) + "\n");
                 fw.write("Path: " + runtimeLogFile.getAbsolutePath() + "\n\n");
             }

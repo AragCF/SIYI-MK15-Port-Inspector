@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.1.0.
+Current version: 1.2.0.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.1.0-debug.apk
+    out\MK15PortInspector-1.2.0-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -91,3 +91,26 @@ The Switch Finder workflow is:
 4. repeat several times.
 
 The app compares RC channel values, Android input state, transport byte streams/counters, and selected Linux system sources. Candidates that change consistently with SA are ranked above noisy background counters.
+
+
+## Standalone report handoff 1.2.0
+
+The buddy operating the MK15 does not need ADB to hand diagnostics back.
+
+The app now creates a complete ZIP and offers three destinations directly on screen:
+
+- **ZIP → Download**: saves to `Download/MK15PortInspector/` so Android File Explorer can find it; with ADB it can also be pulled from that public path.
+- **ZIP → флешка/файл…**: opens Android's system file picker. If a USB flash drive is mounted and exposed by DocumentsUI, select it there.
+- **ZIP → thesystem**: POSTs the report to `https://thesystem.pro/?action=siyi_receive`.
+
+The working ZIP is also kept in the app external files directory under `Android/data/com.mk15.portinspector/files/reports/`.
+
+### thesystem upload contract
+
+`multipart/form-data`
+
+File field: `report` with MIME `application/zip`.
+
+Text fields: `report_id`, `app_version`, `package`, `device`, `android`, `transport`, `sa_channel`, `finder_rounds`.
+
+The UI shows the HTTP result and a short server response. Any HTTP 2xx is treated as success.
