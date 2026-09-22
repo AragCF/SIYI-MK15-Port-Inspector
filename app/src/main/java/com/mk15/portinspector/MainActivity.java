@@ -90,6 +90,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private EditText udpHostEdit;
     private EditText udpPortEdit;
     private Spinner transportSpinner;
+    private volatile String currentTransport = TRANSPORT_AUTO;
 
     private ResearchTransports researchTransports;
 
@@ -213,6 +214,19 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 android.R.layout.simple_spinner_item, transportItems);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         transportSpinner.setAdapter(adapter);
+        transportSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                Object item = parent.getItemAtPosition(position);
+                currentTransport = item == null ? TRANSPORT_AUTO : String.valueOf(item);
+                appendLog("Выбран транспорт: " + currentTransport);
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+                currentTransport = TRANSPORT_AUTO;
+            }
+        });
         transportRow.addView(transportSpinner,
                 new LinearLayout.LayoutParams(dp(230), LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -455,8 +469,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
 
 
     private String selectedTransport() {
-        Object selected = transportSpinner == null ? null : transportSpinner.getSelectedItem();
-        return selected == null ? TRANSPORT_AUTO : String.valueOf(selected);
+        return currentTransport;
     }
 
     private int udpPort() {
@@ -485,11 +498,13 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         }
 
         if (TRANSPORT_AUTO.equals(selected)) {
+            final String udpHost = udpHostEdit.getText().toString().trim();
+            final int udpPortValue = udpPort();
             connectUsb();
             worker.submit(() -> {
                 try {
                     researchTransports.connectUdp(
-                            udpHostEdit.getText().toString().trim(), udpPort(), udpPort());
+                            udpHost, udpPortValue, udpPortValue);
                 } catch (Throwable t) {
                     appendLog("AUTO UDP: " + stackSummary(t));
                 }
@@ -508,11 +523,13 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             return;
         }
 
+        final String udpHost = udpHostEdit.getText().toString().trim();
+        final int udpPortValue = udpPort();
         worker.submit(() -> {
             try {
                 if (TRANSPORT_UDP.equals(selected)) {
                     researchTransports.connectUdp(
-                            udpHostEdit.getText().toString().trim(), udpPort(), udpPort());
+                            udpHost, udpPortValue, udpPortValue);
                 } else if (TRANSPORT_BLUETOOTH.equals(selected)) {
                     researchTransports.connectBluetoothAsync();
                 } else if (TRANSPORT_UART.equals(selected)) {
@@ -662,7 +679,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private Map<String, String> captureProbeSnapshot() {
         Map<String, String> out = new TreeMap<>();
 
-        out.put("transport.selected", selectedTransport());
+        out.put("transport.selected", currentTransport);
         out.put("transport.usb.connected", String.valueOf(serial != null && serial.isOpen()));
         out.put("transport.usb.rxBytes", String.valueOf(usbRxBytes));
         out.put("transport.usb.rxChunks", String.valueOf(usbRxChunks));
