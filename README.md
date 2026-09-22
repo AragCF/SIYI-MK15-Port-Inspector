@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.0.0.
+Current version: 1.0.1.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.0.0-debug.apk
+    out\MK15PortInspector-1.0.1-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -69,3 +69,12 @@ Commits that contain only runs/** diagnostics do not start a new CI build.
 Detailed project notes: 00_README_RU.md, 01_FINDINGS.md, 02_TASK_SCOPE.md, 03_TESTS.md and 04_PROGRESS.md.
 
 Safety: first RC-channel tests must be performed on the bench, not in flight and without an active propulsion system.
+
+
+## Real MK15 diagnostics
+
+After installing and running the APK, connect the MK15 to the Windows PC with ADB enabled and run:
+
+    COLLECT_MK15.bat
+
+For 15 seconds the collector records Linux input events and Android logcat while you move SA through all three positions. It also captures USB/input/TTY/network state and pulls the app persistent runtime log. The resulting runs/device_... directory is automatically committed and pushed to GitHub when possible.

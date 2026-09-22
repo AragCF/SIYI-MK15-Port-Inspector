@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $Root = Split-Path -Parent $PSScriptRoot
 $OutDir = Join-Path $Root 'out'
 $ApkSource = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
-$ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.0.0-debug.apk'
+$ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.0.1-debug.apk'
 $ToolsDir = Join-Path $Root '.tools'
 $GradleVersion = '8.7'
 $GradleZip = Join-Path $ToolsDir ("gradle-" + $GradleVersion + "-bin.zip")

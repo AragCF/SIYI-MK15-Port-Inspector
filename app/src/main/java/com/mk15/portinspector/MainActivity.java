@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class MainActivity extends Activity implements SiyiProtocol.FrameListener {
     private static final String ACTION_USB_PERMISSION = "com.mk15.portinspector.USB_PERMISSION";
     private static final int CHANNEL_COUNT = 16;
-    private static final int LOG_LIMIT = 36_000;
+    private static final int LOG_LIMIT = 64_000;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicInteger sequence = new AtomicInteger(0);
@@ -70,6 +70,10 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private EditText baudEdit;
 
     private final StringBuilder sessionLog = new StringBuilder(16_384);
+    private File runtimeLogFile;
+    private long usbRxBytes;
+    private int usbRxChunks;
+    private int validSiyiFrames;
 
     private final BroadcastReceiver usbPermissionReceiver = new BroadcastReceiver() {
         @Override
@@ -99,8 +103,9 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         registerReceiver(usbPermissionReceiver, new IntentFilter(ACTION_USB_PERMISSION));
 
         setContentView(buildUi());
+        initRuntimeLog();
         applyDefaultMappingPreview();
-        appendLog("MK15 Port Inspector 1.0.0 запущен.");
+        appendLog("MK15 Port Inspector 1.0.1 запущен.");
         appendLog("Важно: поток 0x42 использует тот же канал связи, что телеметрия. Проверять только на столе, не в полёте.");
         scanPorts();
     }
@@ -310,6 +315,15 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             UsbSerialCp210x candidate = new UsbSerialCp210x(usbManager, device, new UsbSerialCp210x.Listener() {
                 @Override
                 public void onBytes(byte[] data, int len) {
+                    usbRxBytes += len;
+                    usbRxChunks++;
+                    if (usbRxChunks <= 20 || (usbRxChunks % 100) == 0) {
+                        byte[] shown = data;
+                        if (len > 96) shown = Arrays.copyOf(data, 96);
+                        appendLog("USB RX chunk=" + usbRxChunks + " len=" + len
+                                + " total=" + usbRxBytes + " hex=" + SiyiProtocol.hex(shown)
+                                + (len > shown.length ? " ..." : ""));
+                    }
                     parser.append(data, len);
                 }
 
@@ -427,6 +441,12 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
 
     @Override
     public void onFrame(SiyiProtocol.Frame frame) {
+        validSiyiFrames++;
+        if (validSiyiFrames <= 20 || (validSiyiFrames % 100) == 0) {
+            appendLog("SIYI frame #" + validSiyiFrames + " cmd=0x"
+                    + String.format(Locale.US, "%02X", frame.cmdId)
+                    + " seq=" + frame.seq + " dataLen=" + frame.data.length);
+        }
         switch (frame.cmdId) {
             case SiyiProtocol.CMD_CHANNEL_DATA:
                 handleChannelFrame(frame.data);
@@ -615,7 +635,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
                 File file = new File(dir, "MK15_PortInspector_" + ts + ".txt");
                 try (FileWriter fw = new FileWriter(file)) {
-                    fw.write("MK15 Port Inspector 1.0.0\n\n");
+                    fw.write("MK15 Port Inspector 1.0.1\n\n");
                     fw.write(scan);
                     fw.write("\n\n=== Журнал сеанса ===\n");
                     fw.write(log);
@@ -627,6 +647,22 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 appendLog("Не удалось сохранить отчёт: " + stackSummary(t));
             }
         });
+    }
+
+    private void initRuntimeLog() {
+        try {
+            File dir = getExternalFilesDir(null);
+            if (dir == null) dir = getFilesDir();
+            if (!dir.exists()) dir.mkdirs();
+            runtimeLogFile = new File(dir, "MK15_PortInspector_runtime.log");
+            try (FileWriter fw = new FileWriter(runtimeLogFile, false)) {
+                fw.write("MK15 Port Inspector 1.0.1 runtime log\n");
+                fw.write("Started: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date()) + "\n");
+                fw.write("Path: " + runtimeLogFile.getAbsolutePath() + "\n\n");
+            }
+        } catch (Throwable ignored) {
+            runtimeLogFile = null;
+        }
     }
 
     private void clearLog() {
@@ -645,6 +681,12 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             sessionLog.append(line);
             if (sessionLog.length() > LOG_LIMIT) {
                 sessionLog.delete(0, sessionLog.length() - LOG_LIMIT);
+            }
+            if (runtimeLogFile != null) {
+                try (FileWriter fw = new FileWriter(runtimeLogFile, true)) {
+                    fw.write(line);
+                } catch (Throwable ignored) {
+                }
             }
         }
         runOnUiThread(() -> {
