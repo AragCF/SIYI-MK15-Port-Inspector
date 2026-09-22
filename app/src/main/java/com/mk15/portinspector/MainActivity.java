@@ -305,7 +305,9 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         finderButtons.setOrientation(LinearLayout.HORIZONTAL);
         finderButtons.addView(button("АВТОПОИСК C/D (20 Гц)", v -> startActiveFinder()));
         finderButtons.addView(button("1. Снять базу", v -> captureFinderBaseline("ручная база")));
-        finderButtons.addView(button("2. Я нажал/изменил — сравнить", v -> compareFinderSnapshot()));
+        finderButtons.addView(button("C → сравнить", v -> compareFinderSnapshot("C")));
+        finderButtons.addView(button("D → сравнить", v -> compareFinderSnapshot("D")));
+        finderButtons.addView(button("Другое → сравнить", v -> compareFinderSnapshot("OTHER")));
         finderButtons.addView(button("Сброс поиска", v -> resetFinder()));
         root.addView(finderButtons, lpMatchWrap());
 
@@ -807,20 +809,28 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     }
 
     private void compareFinderSnapshot() {
+        compareFinderSnapshot("GENERIC");
+    }
+
+    private void compareFinderSnapshot(String actionLabel) {
+        final String action = actionLabel == null ? "GENERIC" : actionLabel;
         worker.submit(() -> {
             try {
                 Map<String, String> snapshot = captureProbeSnapshot();
                 if (!probeDiff.hasBaseline()) {
                     probeDiff.setBaseline(snapshot);
+                    appendFinderHistory("BASE implicit before action=" + action + " keys=" + snapshot.size());
                     runOnUiThread(() -> finderText.setText(
-                            "Базы не было — текущий снимок сохранён как база. Теперь измените исследуемый орган и сравните ещё раз."));
+                            "Базы не было — текущий снимок сохранён как база. Повторите действие и сравнение."));
                     return;
                 }
 
                 ProbeDiffEngine.Result result = probeDiff.compare(snapshot);
-                String formatted = formatFinderResult(result);
-                appendLog("Switch Finder round " + result.round + ": changed=" + result.changes.size());
-                appendFinderHistory(formatted);
+                String formatted = "Действие " + action + ". " + formatFinderResult(result);
+                String full = formatFinderFullResult(action, result);
+                appendLog("Switch Finder action=" + action + " round " + result.round
+                        + ": changed=" + result.changes.size());
+                appendFinderHistory(full);
                 runOnUiThread(() -> finderText.setText(formatted));
             } catch (Throwable t) {
                 appendLog("Switch Finder: сравнение не удалось — " + stackSummary(t));
@@ -855,6 +865,35 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         return sb.toString();
     }
 
+    private String formatFinderFullResult(String action, ProbeDiffEngine.Result result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== ACTION ").append(action)
+                .append(" ROUND ").append(result.round)
+                .append(" CHANGED ").append(result.changes.size()).append(" ===\n");
+
+        sb.append("CHANGES:\n");
+        for (ProbeDiffEngine.Change change : result.changes) {
+            sb.append(change.key)
+                    .append(" weight=").append(String.format(Locale.US, "%.2f", change.weight))
+                    .append(" | ").append(change.before == null ? "∅" : change.before)
+                    .append(" -> ").append(change.after == null ? "∅" : change.after)
+                    .append('\n');
+        }
+
+        sb.append("CANDIDATES:\n");
+        int limit = Math.min(64, result.candidates.size());
+        for (int i = 0; i < limit; i++) {
+            ProbeDiffEngine.Candidate candidate = result.candidates.get(i);
+            sb.append(i + 1).append(". ").append(candidate.key)
+                    .append(" hits=").append(candidate.hits).append('/').append(candidate.rounds)
+                    .append(" score=").append(String.format(Locale.US, "%.2f", candidate.score))
+                    .append(" | ").append(candidate.before == null ? "∅" : candidate.before)
+                    .append(" -> ").append(candidate.after == null ? "∅" : candidate.after)
+                    .append('\n');
+        }
+        return sb.toString();
+    }
+
     private String shortValue(String value) {
         if (value == null) return "∅";
         if (value.length() <= 28) return value;
@@ -874,8 +913,8 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         String stamp = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
         synchronized (finderHistory) {
             finderHistory.append(stamp).append("  ").append(text == null ? "" : text).append('\n');
-            if (finderHistory.length() > 64_000) {
-                finderHistory.delete(0, finderHistory.length() - 64_000);
+            if (finderHistory.length() > 256_000) {
+                finderHistory.delete(0, finderHistory.length() - 256_000);
             }
         }
     }
@@ -893,7 +932,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         if (transportSpinner != null) transportSpinner.setSelection(0);
 
         finderText.setBackgroundColor(Color.rgb(255, 243, 224));
-        finderText.setText("Активный поиск C/D: подключаю USB/UART/UDP. Разрешите USB, если Android спросит. Затем нажимайте C/D и после каждого нажатия — «сравнить».");
+        finderText.setText("Активный поиск C/D: подключаю USB/UART/UDP. Разрешите USB, если Android спросит. Нажмите C, затем «C → сравнить»; D — «D → сравнить». Повторите C-D-C-D.");
         appendLog("Switch Finder ACTIVE: C/D, AUTO transports, RC stream 20 Hz.");
         connectSelectedTransport();
 
