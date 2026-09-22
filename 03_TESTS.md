@@ -42,3 +42,28 @@ ALL PROTOCOL SELF-TESTS PASSED
 - реальные три положения SA.
 
 Для этого в репозитории есть сценарий Windows-сборки, GitHub Actions и сохранение диагностического отчёта в APK.
+
+
+## Проверки версии 1.1.0
+
+### 5. ProbeDiffSelfTest
+
+Добавлен независимый чистый Java-тест дифференциального поиска. Он проверяет, что при нескольких последовательных снимках изменяющийся RC-канал получает более высокий рейтинг, чем постоянно растущие транспортные и interrupt-счётчики.
+
+Результат в CI:
+
+```text
+ALL PROBE DIFF SELF-TESTS PASSED
+```
+
+### 6. Windows PowerShell 5.1
+
+GitHub Actions отдельно выполняет синтаксический разбор всех `tools/*.ps1` именно Windows PowerShell 5.1 до Android-сборки.
+
+### 7. Android Gradle build 1.1.0
+
+Текущий код версии 1.1.0, включая USB, UDP, Bluetooth SPP, raw UART, Android Input, SystemProbe и Switch Finder, успешно собран на Windows runner.
+
+GitHub Actions run: `35731912216`.
+
+Остаётся аппаратная проверка: несколько раундов переключения SA на реальном MK15.
