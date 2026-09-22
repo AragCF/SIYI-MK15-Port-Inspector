@@ -50,11 +50,13 @@ try {
     $ProtocolSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\SiyiProtocol.java'
     $DiffSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ProbeDiffEngine.java'
     $ReportSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ReportTools.java'
+    $ActivitySource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ChannelActivityTracker.java'
     $ProtocolTest = Join-Path $Root 'host-tests\ProtocolSelfTest.java'
     $DiffTest = Join-Path $Root 'host-tests\ProbeDiffSelfTest.java'
     $ReportTest = Join-Path $Root 'host-tests\ReportToolsSelfTest.java'
+    $ActivityTest = Join-Path $Root 'host-tests\ChannelActivityTrackerSelfTest.java'
 
-    & $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $DiffSource $ReportSource $ProtocolTest $DiffTest $ReportTest
+    & $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $DiffSource $ReportSource $ActivitySource $ProtocolTest $DiffTest $ReportTest $ActivityTest
     if ($LASTEXITCODE -ne 0) {
         throw ('javac returned exit code ' + $LASTEXITCODE)
     }
@@ -72,6 +74,11 @@ try {
     & $Java -cp $HostBuild ReportToolsSelfTest
     if ($LASTEXITCODE -ne 0) {
         throw ('ReportToolsSelfTest returned exit code ' + $LASTEXITCODE)
+    }
+
+    & $Java -cp $HostBuild ChannelActivityTrackerSelfTest
+    if ($LASTEXITCODE -ne 0) {
+        throw ('ChannelActivityTrackerSelfTest returned exit code ' + $LASTEXITCODE)
     }
 
     $Rc = 0

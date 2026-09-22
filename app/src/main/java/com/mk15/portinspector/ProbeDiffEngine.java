@@ -140,10 +140,10 @@ public final class ProbeDiffEngine {
         Collections.sort(candidates, new Comparator<Candidate>() {
             @Override
             public int compare(Candidate a, Candidate b) {
-                int h = Integer.compare(b.hits, a.hits);
-                if (h != 0) return h;
                 int s = Double.compare(b.score, a.score);
                 if (s != 0) return s;
+                int h = Integer.compare(b.hits, a.hits);
+                if (h != 0) return h;
                 return a.key.compareTo(b.key);
             }
         });
@@ -154,16 +154,27 @@ public final class ProbeDiffEngine {
 
     public static double weightFor(String key) {
         if (key == null) return 0.0;
+        if (key.startsWith("rcactivity.") && key.endsWith(".changeCount")) return 12.0;
+        if (key.startsWith("rcactivity.") && (key.endsWith(".min") || key.endsWith(".max"))) return 8.0;
+        if (key.startsWith("rcactivity.") && key.endsWith(".last")) return 7.0;
+        if (key.startsWith("rcactivity.") && key.endsWith(".samples")) return 0.05;
         if (key.startsWith("rc.")) return 8.0;
-        if (key.startsWith("input.motion.") && key.endsWith(".value")) return 7.0;
-        if (key.startsWith("input.key.") && key.endsWith(".state")) return 7.0;
-        if (key.startsWith("system.switch.")) return 7.0;
-        if (key.startsWith("system.gpio.") && key.endsWith(".value")) return 7.0;
+        if (key.startsWith("input.motion.") && key.endsWith(".value")) return 9.0;
+        if (key.startsWith("input.key.") && key.endsWith(".state")) return 9.0;
+        if (key.startsWith("input.") && key.endsWith(".eventCount")) return 10.0;
+        if (key.startsWith("system.switch.")) return 8.0;
+        if (key.startsWith("system.gpio.") && key.endsWith(".value")) return 8.0;
+        if (key.startsWith("system.gpio.debug.")) return 0.20;
         if (key.startsWith("system.extcon.") && key.endsWith(".state")) return 6.0;
-        if (key.contains(".lastHex")) return 2.0;
-        if (key.contains(".eventCount")) return 1.5;
-        if (key.contains(".rxBytes") || key.contains(".rxChunks") || key.contains(".txBytes")) return 0.25;
-        if (key.startsWith("system.interrupt.")) return 0.10;
-        return 1.0;
+        if (key.startsWith("linuxinput.") && key.contains("gpio-keys") && key.endsWith(".rxBytes")) return 9.0;
+        if (key.startsWith("linuxinput.") && key.contains("gpio-keys") && key.endsWith(".chunks")) return 8.0;
+        if (key.startsWith("linuxinput.") && key.contains("goodix-ts")) return 0.05;
+        if (key.startsWith("linuxinput.") && (key.endsWith(".rxBytes") || key.endsWith(".chunks"))) return 4.0;
+        if (key.startsWith("linuxinput.") && key.endsWith(".lastHex")) return 3.0;
+        if (key.contains(".lastHex")) return 1.5;
+        if (key.contains(".eventCount")) return 1.0;
+        if (key.contains(".rxBytes") || key.contains(".rxChunks") || key.contains(".txBytes")) return 0.10;
+        if (key.startsWith("system.interrupt.")) return 0.02;
+        return 0.50;
     }
 }

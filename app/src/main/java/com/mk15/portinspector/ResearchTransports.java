@@ -30,7 +30,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class ResearchTransports {
     public static final String UDP = "UDP";
     public static final String BLUETOOTH = "BLUETOOTH";
-    public static final String UART = "UART";
+    public static final String UART0 = "UART0";
+    public static final String UART1 = "UART1";
+    public static final String UART2 = "UART2";
+    public static final String UART = UART0;
 
     public interface Listener {
         void onBytes(String source, byte[] data, int len);
@@ -119,7 +122,11 @@ public final class ResearchTransports {
     }
 
     public synchronized void connectRaw(final String path) throws Exception {
-        stop(UART);
+        connectRaw(UART0, path);
+    }
+
+    public synchronized void connectRaw(final String source, final String path) throws Exception {
+        stop(source);
         final File file = new File(path);
         if (!file.exists()) throw new Exception(path + " does not exist");
         if (!file.canRead()) throw new SecurityException(path + " is not readable by this APK");
@@ -130,12 +137,12 @@ public final class ResearchTransports {
             try {
                 output = new FileOutputStream(file);
             } catch (Throwable t) {
-                info(UART, path + " is readable but write open failed: " + t.getClass().getSimpleName());
+                info(source, path + " is readable but write open failed: " + t.getClass().getSimpleName());
             }
         }
 
         final FileOutputStream finalOutput = output;
-        final Session session = new Session(UART);
+        final Session session = new Session(source);
         session.running = true;
         session.status = "connected " + path + (finalOutput == null ? " read-only" : " read/write");
         session.closer = input;
@@ -146,11 +153,11 @@ public final class ResearchTransports {
                 session.txBytes.addAndGet(data.length);
             };
         }
-        sessions.put(UART, session);
+        sessions.put(source, session);
 
         session.thread = new Thread(() -> {
             byte[] buffer = new byte[1024];
-            info(UART, session.status);
+            info(source, session.status);
             try {
                 while (session.running) {
                     int n = input.read(buffer);
@@ -158,10 +165,10 @@ public final class ResearchTransports {
                     if (n == 0) continue;
                     byte[] copy = Arrays.copyOf(buffer, n);
                     recordRx(session, copy, n);
-                    if (listener != null) listener.onBytes(UART, copy, n);
+                    if (listener != null) listener.onBytes(source, copy, n);
                 }
             } catch (Throwable t) {
-                if (session.running) error(UART, "Raw UART read failed", t);
+                if (session.running) error(source, "Raw UART read failed", t);
             } finally {
                 session.running = false;
                 session.status = "disconnected";
@@ -170,7 +177,7 @@ public final class ResearchTransports {
                     try { finalOutput.close(); } catch (Throwable ignored) {}
                 }
             }
-        }, "mk15-raw-uart-reader");
+        }, "mk15-" + source.toLowerCase() + "-reader");
         session.thread.start();
     }
 
@@ -292,12 +299,14 @@ public final class ResearchTransports {
     public synchronized void stopAll() {
         stop(UDP);
         stop(BLUETOOTH);
-        stop(UART);
+        stop(UART0);
+        stop(UART1);
+        stop(UART2);
     }
 
     public Map<String, String> snapshot() {
         Map<String, String> out = new LinkedHashMap<>();
-        for (String source : Arrays.asList(UDP, BLUETOOTH, UART)) {
+        for (String source : Arrays.asList(UDP, BLUETOOTH, UART0, UART1, UART2)) {
             Session s = sessions.get(source);
             String p = "transport." + source.toLowerCase() + ".";
             if (s == null) {
@@ -313,6 +322,21 @@ public final class ResearchTransports {
         }
         out.put("transport.bluetooth.paired", pairedBluetoothSummary());
         return out;
+    }
+
+    public static boolean hasPairedSiyiDevice() {
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null || !adapter.isEnabled()) return false;
+            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+            if (bonded == null) return false;
+            for (BluetoothDevice d : bonded) {
+                String n = safeName(d).toUpperCase();
+                if (n.contains("SIYI")) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 
     public static String pairedBluetoothSummary() {

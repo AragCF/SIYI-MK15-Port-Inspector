@@ -68,7 +68,9 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private static final String TRANSPORT_USB = "USB COM / CP210x";
     private static final String TRANSPORT_UDP = "UDP";
     private static final String TRANSPORT_BLUETOOTH = "Bluetooth SPP";
-    private static final String TRANSPORT_UART = "UART /dev/ttyHS0";
+    private static final String TRANSPORT_UART0 = "UART /dev/ttyHS0";
+    private static final String TRANSPORT_UART1 = "UART /dev/ttyHS1";
+    private static final String TRANSPORT_UART2 = "UART /dev/ttyHS2";
     private static final String TRANSPORT_INPUT = "Android Input (пассивный)";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -79,6 +81,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private final Map<String, String> inputProbeState = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> inputProbeCounters = new ConcurrentHashMap<>();
     private final ProbeDiffEngine probeDiff = new ProbeDiffEngine();
+    private final ChannelActivityTracker rcActivity = new ChannelActivityTracker();
 
     private UsbManager usbManager;
     private UsbSerialCp210x serial;
@@ -90,7 +93,8 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private final TextView[] channelRows = new TextView[CHANNEL_COUNT];
     private boolean mappingReceived;
     private volatile boolean streamEnabled;
-    private int saChannelIndex = 4; // только как известное заводское значение до ответа 0x48
+    private volatile boolean finderActive;
+    private int saChannelIndex = 4; // известное заводское значение до ответа 0x48
 
     private TextView statusText;
     private TextView saText;
@@ -105,6 +109,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private volatile String currentTransport = TRANSPORT_AUTO;
 
     private ResearchTransports researchTransports;
+    private final LinuxInputProbe linuxInputProbe = new LinuxInputProbe();
 
     private final StringBuilder sessionLog = new StringBuilder(16_384);
     private final StringBuilder finderHistory = new StringBuilder(8_192);
@@ -168,11 +173,18 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         setContentView(buildUi());
         initRuntimeLog();
         applyDefaultMappingPreview();
-        appendLog("MK15 Port Inspector 1.2.0 запущен.");
-        appendLog("Режим исследования поддерживает USB COM, UDP, Bluetooth SPP, /dev/ttyHS0 и Android Input.");
-        appendLog("Важно: поток 0x42 использует тот же канал связи, что телеметрия. Проверять только на столе, не в полёте.");
+        appendLog("MK15 Port Inspector 1.3.0 запущен.");
+        appendLog("Цель текущего исследования: кнопки C/D и другие органы управления MK15.");
+        appendLog("Режим исследования поддерживает USB COM, UDP, Bluetooth SPP, ttyHS0/1/2 и Android Input.");
+        appendLog("Важно: активный поток 0x42 использует тот же канал связи, что телеметрия. Проверять только на столе, не в полёте.");
+        linuxInputProbe.start();
+        appendLog("Linux input probe: запущено пассивное чтение доступных /dev/input/event*.");
         scanPorts();
-        captureFinderBaseline("автоматическая база при запуске");
+        statusText.postDelayed(() -> {
+            appendLog("AUTO: пассивно подключаем доступные транспорты.");
+            connectSelectedTransport();
+        }, 500);
+        statusText.postDelayed(() -> captureFinderBaseline("автоматическая база после подключения"), 1600);
     }
 
     private View buildUi() {
@@ -181,7 +193,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         root.setPadding(dp(12), dp(8), dp(12), dp(8));
         root.setBackgroundColor(Color.rgb(245, 245, 245));
 
-        TextView title = text("SIYI MK15 — поиск портов и переключателя SA", 22, true);
+        TextView title = text("SIYI MK15 — универсальный поиск органов управления", 22, true);
         root.addView(title, lpMatchWrap());
 
         TextView warning = text(
@@ -223,7 +235,9 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 TRANSPORT_USB,
                 TRANSPORT_UDP,
                 TRANSPORT_BLUETOOTH,
-                TRANSPORT_UART,
+                TRANSPORT_UART0,
+                TRANSPORT_UART1,
+                TRANSPORT_UART2,
                 TRANSPORT_INPUT
         };
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
@@ -289,12 +303,13 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
 
         LinearLayout finderButtons = new LinearLayout(this);
         finderButtons.setOrientation(LinearLayout.HORIZONTAL);
+        finderButtons.addView(button("АВТОПОИСК C/D (20 Гц)", v -> startActiveFinder()));
         finderButtons.addView(button("1. Снять базу", v -> captureFinderBaseline("ручная база")));
-        finderButtons.addView(button("2. Я переключил SA — сравнить", v -> compareFinderSnapshot()));
+        finderButtons.addView(button("2. Я нажал/изменил — сравнить", v -> compareFinderSnapshot()));
         finderButtons.addView(button("Сброс поиска", v -> resetFinder()));
         root.addView(finderButtons, lpMatchWrap());
 
-        finderText = text("Поиск источника: снимаю стартовую базу...", 14, true);
+        finderText = text("Поиск: AUTO подключится сам. Для кнопок C/D нажмите «АВТОПОИСК C/D (20 Гц)».", 14, true);
         finderText.setPadding(dp(8), dp(4), dp(8), dp(4));
         finderText.setBackgroundColor(Color.rgb(227, 242, 253));
         root.addView(finderText, lpMatchWrap());
@@ -304,7 +319,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         reportText.setBackgroundColor(Color.rgb(232, 245, 233));
         root.addView(reportText, lpMatchWrap());
 
-        saText = text("SA: заводской mapping = CH5; живые данные ещё не получены", 20, true);
+        saText = text("Каналы: ждём живые данные; C≈CH10, D≈CH11 по заводскому mapping", 20, true);
         saText.setPadding(dp(8), dp(5), dp(8), dp(5));
         saText.setBackgroundColor(Color.rgb(255, 248, 225));
         root.addView(saText, lpMatchWrap());
@@ -481,6 +496,15 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 sendFrame(SiyiProtocol.mappingRequest(nextSeq()), "0x48 запрос mapping");
                 sendFrame(SiyiProtocol.request(SiyiProtocol.CMD_HARDWARE_ID, new byte[0], nextSeq()), "0x40 hardware ID");
                 sendFrame(SiyiProtocol.request(SiyiProtocol.CMD_FIRMWARE_VERSION, new byte[0], nextSeq()), "0x47 версии");
+                if (finderActive) {
+                    byte[] active = SiyiProtocol.channelStreamRequest(5, nextSeq());
+                    for (int i = 0; i < 3; i++) {
+                        sendFrame(active, i == 0 ? "0x42 ACTIVE 20Hz [USB after permission]" : null);
+                        sleepQuiet(60);
+                    }
+                    streamEnabled = true;
+                    appendLog("Switch Finder ACTIVE: USB подключился позже и тоже включён на 20 Гц.");
+                }
             } catch (Throwable t) {
                 candidate.close();
                 serial = null;
@@ -532,16 +556,31 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                     appendLog("AUTO UDP: " + stackSummary(t));
                 }
                 try {
-                    researchTransports.connectRaw("/dev/ttyHS0");
+                    researchTransports.connectRaw(ResearchTransports.UART0, "/dev/ttyHS0");
                 } catch (Throwable t) {
-                    appendLog("AUTO UART: " + stackSummary(t));
+                    appendLog("AUTO UART0: " + stackSummary(t));
                 }
                 try {
-                    researchTransports.connectBluetoothAsync();
+                    researchTransports.connectRaw(ResearchTransports.UART1, "/dev/ttyHS1");
                 } catch (Throwable t) {
-                    appendLog("AUTO Bluetooth: " + stackSummary(t));
+                    appendLog("AUTO UART1: " + stackSummary(t));
+                }
+                try {
+                    researchTransports.connectRaw(ResearchTransports.UART2, "/dev/ttyHS2");
+                } catch (Throwable t) {
+                    appendLog("AUTO UART2: " + stackSummary(t));
+                }
+                if (ResearchTransports.hasPairedSiyiDevice()) {
+                    try {
+                        researchTransports.connectBluetoothAsync();
+                    } catch (Throwable t) {
+                        appendLog("AUTO Bluetooth: " + stackSummary(t));
+                    }
+                } else {
+                    appendLog("AUTO Bluetooth: SIYI-подобного спаренного устройства нет; случайное Bluetooth-устройство не трогаем.");
                 }
                 captureFinderBaseline("AUTO transports подключены");
+                if (finderActive) activateFinderStreamOnAllWritable();
             });
             return;
         }
@@ -555,8 +594,12 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                             udpHost, udpPortValue, udpPortValue);
                 } else if (TRANSPORT_BLUETOOTH.equals(selected)) {
                     researchTransports.connectBluetoothAsync();
-                } else if (TRANSPORT_UART.equals(selected)) {
-                    researchTransports.connectRaw("/dev/ttyHS0");
+                } else if (TRANSPORT_UART0.equals(selected)) {
+                    researchTransports.connectRaw(ResearchTransports.UART0, "/dev/ttyHS0");
+                } else if (TRANSPORT_UART1.equals(selected)) {
+                    researchTransports.connectRaw(ResearchTransports.UART1, "/dev/ttyHS1");
+                } else if (TRANSPORT_UART2.equals(selected)) {
+                    researchTransports.connectRaw(ResearchTransports.UART2, "/dev/ttyHS2");
                 }
                 captureFinderBaseline("транспорт " + selected + " подключён");
             } catch (Throwable t) {
@@ -607,13 +650,17 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         if (researchTransports == null) return false;
         return researchTransports.isWritable(ResearchTransports.UDP)
                 || researchTransports.isWritable(ResearchTransports.BLUETOOTH)
-                || researchTransports.isWritable(ResearchTransports.UART);
+                || researchTransports.isWritable(ResearchTransports.UART0)
+                || researchTransports.isWritable(ResearchTransports.UART1)
+                || researchTransports.isWritable(ResearchTransports.UART2);
     }
 
     private String sourceForSelection(String selection) {
         if (TRANSPORT_UDP.equals(selection)) return ResearchTransports.UDP;
         if (TRANSPORT_BLUETOOTH.equals(selection)) return ResearchTransports.BLUETOOTH;
-        if (TRANSPORT_UART.equals(selection)) return ResearchTransports.UART;
+        if (TRANSPORT_UART0.equals(selection)) return ResearchTransports.UART0;
+        if (TRANSPORT_UART1.equals(selection)) return ResearchTransports.UART1;
+        if (TRANSPORT_UART2.equals(selection)) return ResearchTransports.UART2;
         return null;
     }
 
@@ -631,7 +678,9 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             }
             sent |= sendResearchFrame(ResearchTransports.UDP, frame, label);
             sent |= sendResearchFrame(ResearchTransports.BLUETOOTH, frame, label);
-            sent |= sendResearchFrame(ResearchTransports.UART, frame, label);
+            sent |= sendResearchFrame(ResearchTransports.UART0, frame, label);
+            sent |= sendResearchFrame(ResearchTransports.UART1, frame, label);
+            sent |= sendResearchFrame(ResearchTransports.UART2, frame, label);
             return sent;
         }
 
@@ -710,6 +759,8 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         out.put("transport.usb.lastHex", usbLastHex);
 
         if (researchTransports != null) out.putAll(researchTransports.snapshot());
+        out.putAll(rcActivity.snapshot());
+        out.putAll(linuxInputProbe.snapshot());
 
         for (Map.Entry<String, String> e : inputProbeState.entrySet()) {
             out.put(e.getKey(), e.getValue());
@@ -747,7 +798,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 appendFinderHistory("BASE " + reason + " keys=" + snapshot.size());
                 runOnUiThread(() -> finderText.setText(
                         "База снята: " + snapshot.size()
-                                + " источников/значений. Переключите SA в другое положение и нажмите «сравнить»."
+                                + " источников/значений. Нажмите C/D, сдвиньте переключатель или измените исследуемый орган, затем нажмите «сравнить»."
                 ));
             } catch (Throwable t) {
                 appendLog("Switch Finder: база не снята — " + stackSummary(t));
@@ -762,7 +813,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 if (!probeDiff.hasBaseline()) {
                     probeDiff.setBaseline(snapshot);
                     runOnUiThread(() -> finderText.setText(
-                            "Базы не было — текущий снимок сохранён как база. Теперь переключите SA и сравните ещё раз."));
+                            "Базы не было — текущий снимок сохранён как база. Теперь измените исследуемый орган и сравните ещё раз."));
                     return;
                 }
 
@@ -783,7 +834,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 .append(": изменилось ").append(result.changes.size()).append(" значений. ");
 
         if (result.changes.isEmpty()) {
-            sb.append("Явных изменений нет. Переключите SA в другое положение и повторите.");
+            sb.append("Явных изменений нет. Нажмите C/D или измените исследуемый орган и повторите.");
             return sb.toString();
         }
 
@@ -799,7 +850,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                     .append(shortValue(c.before)).append("→").append(shortValue(c.after));
         }
 
-        sb.append(". Переключите SA ещё раз в другое положение и снова нажмите «сравнить»; ")
+        sb.append(". Измените орган управления ещё раз и снова нажмите «сравнить»; ")
                 .append("источник, который меняется во всех раундах, поднимется наверх.");
         return sb.toString();
     }
@@ -815,7 +866,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         synchronized (finderHistory) {
             finderHistory.setLength(0);
         }
-        finderText.setText("Поиск сброшен. Нажмите «1. Снять базу», затем переключите SA.");
+        finderText.setText("Поиск сброшен. Для C/D нажмите «АВТОПОИСК C/D (20 Гц)» или снимите базу вручную.");
         appendLog("Switch Finder: поиск сброшен.");
     }
 
@@ -826,6 +877,68 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             if (finderHistory.length() > 64_000) {
                 finderHistory.delete(0, finderHistory.length() - 64_000);
             }
+        }
+    }
+
+    private void startActiveFinder() {
+        finderActive = true;
+        streamEnabled = false;
+        probeDiff.reset();
+        rcActivity.clear();
+        synchronized (finderHistory) {
+            finderHistory.setLength(0);
+        }
+
+        currentTransport = TRANSPORT_AUTO;
+        if (transportSpinner != null) transportSpinner.setSelection(0);
+
+        finderText.setBackgroundColor(Color.rgb(255, 243, 224));
+        finderText.setText("Активный поиск C/D: подключаю USB/UART/UDP. Разрешите USB, если Android спросит. Затем нажимайте C/D и после каждого нажатия — «сравнить».");
+        appendLog("Switch Finder ACTIVE: C/D, AUTO transports, RC stream 20 Hz.");
+        connectSelectedTransport();
+
+        worker.submit(() -> {
+            sleepQuiet(1800);
+            activateFinderStreamOnAllWritable();
+            captureFinderBaseline("активный C/D после запуска 20 Гц");
+        });
+    }
+
+    private void activateFinderStreamOnAllWritable() {
+        int seq = nextSeq();
+        byte[] stream20 = SiyiProtocol.channelStreamRequest(5, seq); // SIYI: 20 Hz
+        boolean sent = false;
+        for (int i = 0; i < 3; i++) {
+            if (serial != null && serial.isOpen()) {
+                sent |= sendFrame(stream20, i == 0 ? "0x42 ACTIVE 20Hz [USB]" : null);
+            }
+            sent |= sendResearchFrame(ResearchTransports.UDP, stream20,
+                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
+            sent |= sendResearchFrame(ResearchTransports.UART0, stream20,
+                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
+            sent |= sendResearchFrame(ResearchTransports.UART1, stream20,
+                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
+            sent |= sendResearchFrame(ResearchTransports.UART2, stream20,
+                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
+            if (ResearchTransports.hasPairedSiyiDevice()) {
+                sent |= sendResearchFrame(ResearchTransports.BLUETOOTH, stream20,
+                        i == 0 ? "0x42 ACTIVE 20Hz" : null);
+            }
+            sleepQuiet(60);
+        }
+
+        if (sent) {
+            streamEnabled = true;
+            sendSelectedFrame(SiyiProtocol.mappingRequest(nextSeq()), "0x48 ACTIVE mapping");
+            appendLog("Switch Finder ACTIVE: 20 Гц отправлен хотя бы в один транспорт.");
+            runOnUiThread(() -> {
+                setStatus("Активный поиск C/D: RC 20 Гц");
+                finderText.setBackgroundColor(Color.rgb(232, 245, 233));
+            });
+        } else {
+            appendLog("Switch Finder ACTIVE: пока нет записываемого транспорта; ждём USB permission/повторного запуска.");
+            runOnUiThread(() -> finderText.setText(
+                    "Активный поиск: транспорт пока не открылся. Если было окно USB — разрешите доступ и снова нажмите «АВТОПОИСК C/D (20 Гц)»."));
         }
     }
 
@@ -867,6 +980,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     }
 
     private void stopRcStream(boolean userInitiated) {
+        if (userInitiated) finderActive = false;
         if (!hasAnyWritableTransport()) {
             streamEnabled = false;
             if (userInitiated) appendLog("RC: нет подключённого записываемого транспорта.");
@@ -960,6 +1074,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         for (int i = 0; i < CHANNEL_COUNT; i++) values[i] = SiyiProtocol.u16le(data, i * 2);
         System.arraycopy(values, 0, channelValue, 0, CHANNEL_COUNT);
         rcBySource.put(source.toLowerCase(Locale.US), Arrays.copyOf(values, values.length));
+        rcActivity.update(source, values);
         lastRcSource = source;
 
         runOnUiThread(() -> {
@@ -969,8 +1084,11 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 updateChannelRow(i, name, values[i], isSa);
             }
             int saValue = saChannelIndex >= 0 && saChannelIndex < CHANNEL_COUNT ? values[saChannelIndex] : -1;
-            String mappingNote = mappingReceived ? "по фактическому mapping 0x48" : "по заводскому CH5; mapping 0x48 ещё не подтверждён";
-            saText.setText("SA → CH" + (saChannelIndex + 1) + " = " + saValue + "  [" + source + "] (" + mappingNote + ")");
+            String mappingNote = mappingReceived ? "mapping 0x48 подтверждён" : "mapping пока заводской";
+            saText.setText("Живые RC [" + source + "]: C/CH10=" + values[9]
+                    + " D/CH11=" + values[10]
+                    + " SA/CH" + (saChannelIndex + 1) + "=" + saValue
+                    + " (" + mappingNote + ")");
             saText.setBackgroundColor(Color.rgb(200, 230, 201));
         });
     }
@@ -1142,13 +1260,14 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 try {
                     Map<String, String> fields = new LinkedHashMap<>();
                     fields.put("report_id", zip.getName());
-                    fields.put("app_version", "1.2.0");
+                    fields.put("app_version", "1.3.0");
                     fields.put("package", getPackageName());
                     fields.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                     fields.put("android", Build.VERSION.RELEASE + " / API " + Build.VERSION.SDK_INT);
                     fields.put("transport", currentTransport);
                     fields.put("sa_channel", String.valueOf(saChannelIndex + 1));
                     fields.put("finder_rounds", String.valueOf(probeDiff.getRounds()));
+                    fields.put("research_target", "C/D buttons plus generic controls");
 
                     ReportTools.UploadResult result =
                             ReportTools.uploadMultipart(REPORT_ENDPOINT, zip, fields);
@@ -1215,7 +1334,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 }
 
                 String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-                String fileName = "MK15_Report_" + ts + "_v1.2.0.zip";
+                String fileName = "MK15_Report_" + ts + "_v1.3.0.zip";
 
                 File base = getExternalFilesDir(null);
                 if (base == null) base = getFilesDir();
@@ -1288,7 +1407,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             String reason, String status, String sa, String fileName) {
         return "report_format=1\n"
                 + "app=MK15 Port Inspector\n"
-                + "app_version=1.2.0\n"
+                + "app_version=1.3.0\n"
                 + "package=" + getPackageName() + "\n"
                 + "created_at=" + new SimpleDateFormat(
                         "yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US).format(new Date()) + "\n"
@@ -1303,7 +1422,8 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 + "api=" + Build.VERSION.SDK_INT + "\n"
                 + "transport=" + currentTransport + "\n"
                 + "status=" + status + "\n"
-                + "sa=" + sa + "\n"
+                + "research_target=C/D buttons plus generic controls\n"
+                + "control_status=" + sa + "\n"
                 + "finder_rounds=" + probeDiff.getRounds() + "\n"
                 + "upload_endpoint=" + REPORT_ENDPOINT + "\n";
     }
@@ -1318,7 +1438,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 + "Upload contract:\n"
                 + "  multipart file field: report (application/zip)\n"
                 + "  text fields: report_id, app_version, package, device, android, transport, "
-                + "sa_channel, finder_rounds\n";
+                + "sa_channel, finder_rounds, research_target\n";
     }
 
     private String mapToText(Map<String, String> map) {
@@ -1490,7 +1610,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             if (!dir.exists()) dir.mkdirs();
             runtimeLogFile = new File(dir, "MK15_PortInspector_runtime.log");
             try (FileWriter fw = new FileWriter(runtimeLogFile, false)) {
-                fw.write("MK15 Port Inspector 1.2.0 runtime log\n");
+                fw.write("MK15 Port Inspector 1.3.0 runtime log\n");
                 fw.write("Started: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date()) + "\n");
                 fw.write("Path: " + runtimeLogFile.getAbsolutePath() + "\n\n");
             }
@@ -1580,6 +1700,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         streamEnabled = false;
         closeSerial();
         if (researchTransports != null) researchTransports.stopAll();
+        linuxInputProbe.stop();
         worker.shutdownNow();
         try { unregisterReceiver(usbPermissionReceiver); } catch (Throwable ignored) {}
         super.onDestroy();

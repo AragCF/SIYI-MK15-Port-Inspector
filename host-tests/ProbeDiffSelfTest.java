@@ -35,6 +35,24 @@ public final class ProbeDiffSelfTest {
         require(r2.candidates.get(0).score > ProbeDiffEngine.weightFor("transport.usb.rxBytes"),
                 "RC score must be stronger than transport byte counter");
 
+        ProbeDiffEngine momentary = new ProbeDiffEngine();
+        Map<String, String> b = new LinkedHashMap<>();
+        b.put("system.interrupt.1", "100");
+        b.put("rcactivity.uart0.ch10.changeCount", "0");
+        momentary.setBaseline(b);
+
+        Map<String, String> m1 = new LinkedHashMap<>();
+        m1.put("system.interrupt.1", "101");
+        m1.put("rcactivity.uart0.ch10.changeCount", "2");
+        momentary.compare(m1);
+
+        Map<String, String> m2 = new LinkedHashMap<>();
+        m2.put("system.interrupt.1", "102");
+        m2.put("rcactivity.uart0.ch10.changeCount", "2");
+        ProbeDiffEngine.Result mr = momentary.compare(m2);
+        require("rcactivity.uart0.ch10.changeCount".equals(mr.candidates.get(0).key),
+                "high-value momentary candidate must outrank always-changing interrupt noise");
+
         System.out.println("ALL PROBE DIFF SELF-TESTS PASSED");
     }
 }

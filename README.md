@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.2.0.
+Current version: 1.3.0.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.2.0-debug.apk
+    out\MK15PortInspector-1.3.0-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -114,3 +114,19 @@ File field: `report` with MIME `application/zip`.
 Text fields: `report_id`, `app_version`, `package`, `device`, `android`, `transport`, `sa_channel`, `finder_rounds`.
 
 The UI shows the HTTP result and a short server response. Any HTTP 2xx is treated as success.
+
+
+## Control Finder 1.3.0 — C/D and momentary controls
+
+A real MK15 report showed that the operator was testing the physical **C/D buttons**, not SA, and that all three internal UART nodes (`/dev/ttyHS0`, `ttyHS1`, `ttyHS2`) are readable and writable from the normal APK sandbox. The embedded CP2102 is also visible to Android USB Host.
+
+Version 1.3.0 therefore:
+- passively AUTO-connects USB/UDP/UART0/UART1/UART2 after launch;
+- does not auto-connect an unrelated paired Bluetooth device;
+- adds a one-button **АВТОПОИСК C/D (20 Гц)** mode;
+- samples SIYI RC channels at 20 Hz during active C/D research;
+- retains per-channel min/max/last/changeCount so a momentary button press is not lost after the button is released;
+- ranks high-value RC/Input activity before continuously changing interrupt counters;
+- changes the comparison wording from SA-specific to generic control research.
+
+The existing SA mapping display remains available because the robot team may still need the switch later.
