@@ -173,7 +173,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         setContentView(buildUi());
         initRuntimeLog();
         applyDefaultMappingPreview();
-        appendLog("MK15 Port Inspector 1.3.0 запущен.");
+        appendLog("MK15 Port Inspector 1.3.1 запущен.");
         appendLog("Цель текущего исследования: кнопки C/D и другие органы управления MK15.");
         appendLog("Режим исследования поддерживает USB COM, UDP, Bluetooth SPP, ttyHS0/1/2 и Android Input.");
         appendLog("Важно: активный поток 0x42 использует тот же канал связи, что телеметрия. Проверять только на столе, не в полёте.");
@@ -681,8 +681,6 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             sent |= sendResearchFrame(ResearchTransports.UDP, frame, label);
             sent |= sendResearchFrame(ResearchTransports.BLUETOOTH, frame, label);
             sent |= sendResearchFrame(ResearchTransports.UART0, frame, label);
-            sent |= sendResearchFrame(ResearchTransports.UART1, frame, label);
-            sent |= sendResearchFrame(ResearchTransports.UART2, frame, label);
             return sent;
         }
 
@@ -920,6 +918,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     }
 
     private void startActiveFinder() {
+        final int framesBefore = validSiyiFrames;
         finderActive = true;
         streamEnabled = false;
         probeDiff.reset();
@@ -940,6 +939,18 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             sleepQuiet(1800);
             activateFinderStreamOnAllWritable();
             captureFinderBaseline("активный C/D после запуска 20 Гц");
+            sleepQuiet(2200);
+            if (validSiyiFrames <= framesBefore) {
+                appendLog("SIYI SDK: после активной пробы нет ни одного валидного ответа. "
+                        + "Проверьте SIYI TX -> Datalink -> Connection. "
+                        + "Официальный SDK UART: /dev/ttyHS0, 115200.");
+                runOnUiThread(() -> {
+                    finderText.setBackgroundColor(Color.rgb(255, 224, 178));
+                    finderText.setText("Нет ответа SIYI SDK. Откройте SIYI TX → Datalink и проверьте Connection. "
+                            + "Для UART используйте /dev/ttyHS0; приложение 1.3.1 настраивает его 115200 raw. "
+                            + "После смены Connection снова нажмите «АВТОПОИСК C/D (20 Гц)».");
+                });
+            }
         });
     }
 
@@ -954,11 +965,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             sent |= sendResearchFrame(ResearchTransports.UDP, stream20,
                     i == 0 ? "0x42 ACTIVE 20Hz" : null);
             sent |= sendResearchFrame(ResearchTransports.UART0, stream20,
-                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
-            sent |= sendResearchFrame(ResearchTransports.UART1, stream20,
-                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
-            sent |= sendResearchFrame(ResearchTransports.UART2, stream20,
-                    i == 0 ? "0x42 ACTIVE 20Hz" : null);
+                    i == 0 ? "0x42 ACTIVE 20Hz [official UART0]" : null);
             if (ResearchTransports.hasPairedSiyiDevice()) {
                 sent |= sendResearchFrame(ResearchTransports.BLUETOOTH, stream20,
                         i == 0 ? "0x42 ACTIVE 20Hz" : null);
@@ -1299,7 +1306,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 try {
                     Map<String, String> fields = new LinkedHashMap<>();
                     fields.put("report_id", zip.getName());
-                    fields.put("app_version", "1.3.0");
+                    fields.put("app_version", "1.3.1");
                     fields.put("package", getPackageName());
                     fields.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                     fields.put("android", Build.VERSION.RELEASE + " / API " + Build.VERSION.SDK_INT);
@@ -1373,7 +1380,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 }
 
                 String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-                String fileName = "MK15_Report_" + ts + "_v1.3.0.zip";
+                String fileName = "MK15_Report_" + ts + "_v1.3.1.zip";
 
                 File base = getExternalFilesDir(null);
                 if (base == null) base = getFilesDir();
@@ -1446,7 +1453,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             String reason, String status, String sa, String fileName) {
         return "report_format=1\n"
                 + "app=MK15 Port Inspector\n"
-                + "app_version=1.3.0\n"
+                + "app_version=1.3.1\n"
                 + "package=" + getPackageName() + "\n"
                 + "created_at=" + new SimpleDateFormat(
                         "yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US).format(new Date()) + "\n"
@@ -1464,12 +1471,13 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 + "research_target=C/D buttons plus generic controls\n"
                 + "control_status=" + sa + "\n"
                 + "finder_rounds=" + probeDiff.getRounds() + "\n"
+                + "valid_siyi_frames=" + validSiyiFrames + "\n"
                 + "upload_endpoint=" + REPORT_ENDPOINT + "\n";
     }
 
     private String buildReportReadme() {
         return "MK15 Port Inspector diagnostic report ZIP\n\n"
-                + "Created entirely on the MK15 without ADB.\n"
+                + "Created entirely on the MK15 without ADB. Version 1.3.1 configures official UART0 (/dev/ttyHS0) to 115200 raw before SDK probing.\n"
                 + "The working ZIP is kept under the app external files/reports directory.\n"
                 + "ZIP → Download copies it to Download/MK15PortInspector for File Explorer and adb pull.\n"
                 + "ZIP → флешка/файл opens Android's file picker; select a USB flash drive if it is mounted.\n"
@@ -1649,7 +1657,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             if (!dir.exists()) dir.mkdirs();
             runtimeLogFile = new File(dir, "MK15_PortInspector_runtime.log");
             try (FileWriter fw = new FileWriter(runtimeLogFile, false)) {
-                fw.write("MK15 Port Inspector 1.3.0 runtime log\n");
+                fw.write("MK15 Port Inspector 1.3.1 runtime log\n");
                 fw.write("Started: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date()) + "\n");
                 fw.write("Path: " + runtimeLogFile.getAbsolutePath() + "\n\n");
             }
