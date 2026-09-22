@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.3.0.
+Current version: 1.3.1.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.3.0-debug.apk
+    out\MK15PortInspector-1.3.1-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -130,3 +130,19 @@ Version 1.3.0 therefore:
 - changes the comparison wording from SA-specific to generic control research.
 
 The existing SA mapping display remains available because the robot team may still need the switch later.
+
+
+## UART/Datalink correction 1.3.1
+
+Four real 1.3.0 reports showed that USB, UDP and UART0/1/2 were opened and commands were transmitted, but every transport still had rxBytes=0 and no valid SIYI frame was received.
+
+The official SIYI SDK documentation says:
+- Datalink communication interface is selected in SIYI TX;
+- SDK UART is /dev/ttyHS0;
+- SDK UART baud is 115200.
+
+Version 1.3.1 therefore:
+- configures /dev/ttyHS0 to 115200 raw mode before opening it;
+- keeps ttyHS1/2 as experimental/passive sources and no longer sprays active SIYI commands to them in AUTO;
+- after an active C/D probe, explicitly warns on screen when no valid SIYI frame was received and asks the operator to check SIYI TX -> Datalink -> Connection;
+- stores UART configuration diagnostics and the valid SIYI frame count in reports.
