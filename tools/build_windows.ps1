@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $Root = Split-Path -Parent $PSScriptRoot
 $OutDir = Join-Path $Root 'out'
 $ApkSource = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
-$ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.0.1-debug.apk'
+$ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.1.0-debug.apk'
 $ToolsDir = Join-Path $Root '.tools'
 $GradleVersion = '8.7'
 $GradleZip = Join-Path $ToolsDir ("gradle-" + $GradleVersion + "-bin.zip")
@@ -95,11 +95,13 @@ New-Item -ItemType Directory -Force -Path $HostBuild | Out-Null
 $Javac = Join-Path $JavaHome 'bin\javac.exe'
 $Java = Join-Path $JavaHome 'bin\java.exe'
 $ProtocolSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\SiyiProtocol.java'
+$DiffSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ProbeDiffEngine.java'
 $ProtocolTest = Join-Path $Root 'host-tests\ProtocolSelfTest.java'
+$DiffTest = Join-Path $Root 'host-tests\ProbeDiffSelfTest.java'
 
 Write-Host ''
 Write-Host 'Running SIYI protocol self-test...'
-& $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $ProtocolTest
+& $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $DiffSource $ProtocolTest $DiffTest
 if ($LASTEXITCODE -ne 0) {
     Fail ('javac protocol test compile returned exit code ' + $LASTEXITCODE)
 }
@@ -107,6 +109,10 @@ if ($LASTEXITCODE -ne 0) {
 & $Java -cp $HostBuild ProtocolSelfTest
 if ($LASTEXITCODE -ne 0) {
     Fail ('ProtocolSelfTest returned exit code ' + $LASTEXITCODE)
+}
+& $Java -cp $HostBuild ProbeDiffSelfTest
+if ($LASTEXITCODE -ne 0) {
+    Fail ('ProbeDiffSelfTest returned exit code ' + $LASTEXITCODE)
 }
 
 $GradleCmd = Get-Command gradle.bat -ErrorAction SilentlyContinue

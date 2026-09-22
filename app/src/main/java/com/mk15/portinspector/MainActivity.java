@@ -17,11 +17,13 @@ import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -30,11 +32,16 @@ import java.io.FileWriter;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Диагностическое приложение для SIYI MK15.
@@ -45,11 +52,22 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class MainActivity extends Activity implements SiyiProtocol.FrameListener {
     private static final String ACTION_USB_PERMISSION = "com.mk15.portinspector.USB_PERMISSION";
     private static final int CHANNEL_COUNT = 16;
-    private static final int LOG_LIMIT = 64_000;
+    private static final int LOG_LIMIT = 96_000;
+    private static final String TRANSPORT_AUTO = "AUTO / все безопасные";
+    private static final String TRANSPORT_USB = "USB COM / CP210x";
+    private static final String TRANSPORT_UDP = "UDP";
+    private static final String TRANSPORT_BLUETOOTH = "Bluetooth SPP";
+    private static final String TRANSPORT_UART = "UART /dev/ttyHS0";
+    private static final String TRANSPORT_INPUT = "Android Input (пассивный)";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicInteger sequence = new AtomicInteger(0);
     private final SiyiProtocol.Parser parser = new SiyiProtocol.Parser(this);
+    private final Map<String, SiyiProtocol.Parser> extraParsers = new ConcurrentHashMap<>();
+    private final Map<String, int[]> rcBySource = new ConcurrentHashMap<>();
+    private final Map<String, String> inputProbeState = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> inputProbeCounters = new ConcurrentHashMap<>();
+    private final ProbeDiffEngine probeDiff = new ProbeDiffEngine();
 
     private UsbManager usbManager;
     private UsbSerialCp210x serial;
@@ -67,13 +85,22 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     private TextView saText;
     private TextView logText;
     private TextView scanText;
+    private TextView finderText;
     private EditText baudEdit;
+    private EditText udpHostEdit;
+    private EditText udpPortEdit;
+    private Spinner transportSpinner;
+
+    private ResearchTransports researchTransports;
 
     private final StringBuilder sessionLog = new StringBuilder(16_384);
     private File runtimeLogFile;
     private long usbRxBytes;
     private int usbRxChunks;
+    private long usbTxBytes;
+    private String usbLastHex = "";
     private int validSiyiFrames;
+    private String lastRcSource = "none";
 
     private final BroadcastReceiver usbPermissionReceiver = new BroadcastReceiver() {
         @Override
@@ -102,12 +129,33 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         registerReceiver(usbPermissionReceiver, new IntentFilter(ACTION_USB_PERMISSION));
 
+        researchTransports = new ResearchTransports(new ResearchTransports.Listener() {
+            @Override
+            public void onBytes(String source, byte[] data, int len) {
+                ingestBytes(source, data, len);
+            }
+
+            @Override
+            public void onInfo(String source, String message) {
+                appendLog(source + ": " + message);
+                runOnUiThread(() -> setStatus(source + ": " + message));
+            }
+
+            @Override
+            public void onError(String source, String message, Throwable error) {
+                appendLog(source + ": " + message + (error == null ? "" : " — " + stackSummary(error)));
+                runOnUiThread(() -> setStatus(source + ": ошибка"));
+            }
+        });
+
         setContentView(buildUi());
         initRuntimeLog();
         applyDefaultMappingPreview();
-        appendLog("MK15 Port Inspector 1.0.1 запущен.");
+        appendLog("MK15 Port Inspector 1.1.0 запущен.");
+        appendLog("Режим исследования поддерживает USB COM, UDP, Bluetooth SPP, /dev/ttyHS0 и Android Input.");
         appendLog("Важно: поток 0x42 использует тот же канал связи, что телеметрия. Проверять только на столе, не в полёте.");
         scanPorts();
+        captureFinderBaseline("автоматическая база при запуске");
     }
 
     private View buildUi() {
@@ -144,13 +192,59 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         statusLine.addView(baudEdit, new LinearLayout.LayoutParams(dp(125), LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(statusLine, lpMatchWrap());
 
+        HorizontalScrollView transportScroller = new HorizontalScrollView(this);
+        LinearLayout transportRow = new LinearLayout(this);
+        transportRow.setOrientation(LinearLayout.HORIZONTAL);
+        transportRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView transportLabel = text("Транспорт:", 14, true);
+        transportRow.addView(transportLabel);
+
+        transportSpinner = new Spinner(this);
+        String[] transportItems = {
+                TRANSPORT_AUTO,
+                TRANSPORT_USB,
+                TRANSPORT_UDP,
+                TRANSPORT_BLUETOOTH,
+                TRANSPORT_UART,
+                TRANSPORT_INPUT
+        };
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, transportItems);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        transportSpinner.setAdapter(adapter);
+        transportRow.addView(transportSpinner,
+                new LinearLayout.LayoutParams(dp(230), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView hostLabel = text(" UDP host:", 13, false);
+        transportRow.addView(hostLabel);
+        udpHostEdit = new EditText(this);
+        udpHostEdit.setSingleLine(true);
+        udpHostEdit.setText("192.168.144.12");
+        transportRow.addView(udpHostEdit,
+                new LinearLayout.LayoutParams(dp(165), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView portLabel = text(" port:", 13, false);
+        transportRow.addView(portLabel);
+        udpPortEdit = new EditText(this);
+        udpPortEdit.setSingleLine(true);
+        udpPortEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
+        udpPortEdit.setText("19856");
+        transportRow.addView(udpPortEdit,
+                new LinearLayout.LayoutParams(dp(90), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        transportRow.addView(button("Подключить", v -> connectSelectedTransport()));
+        transportRow.addView(button("Отключить всё", v -> disconnectAllTransports()));
+        transportScroller.addView(transportRow);
+        root.addView(transportScroller, lpMatchWrap());
+
         HorizontalScrollView commandScroller = new HorizontalScrollView(this);
         commandScroller.setHorizontalScrollBarEnabled(true);
         LinearLayout commands = new LinearLayout(this);
         commands.setOrientation(LinearLayout.HORIZONTAL);
 
         commands.addView(button("Сканировать порты", v -> scanPorts()));
-        commands.addView(button("Подключить USB COM", v -> connectUsb()));
+        commands.addView(button("Подключить выбранный", v -> connectSelectedTransport()));
         commands.addView(button("Mapping 0x48", v -> requestMapping()));
         commands.addView(button("RC 4 Гц 0x42", v -> startRcStream()));
         commands.addView(button("СТОП RC", v -> stopRcStream(true)));
@@ -160,6 +254,18 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         commandScroller.addView(commands);
         root.addView(commandScroller, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout finderButtons = new LinearLayout(this);
+        finderButtons.setOrientation(LinearLayout.HORIZONTAL);
+        finderButtons.addView(button("1. Снять базу", v -> captureFinderBaseline("ручная база")));
+        finderButtons.addView(button("2. Я переключил SA — сравнить", v -> compareFinderSnapshot()));
+        finderButtons.addView(button("Сброс поиска", v -> resetFinder()));
+        root.addView(finderButtons, lpMatchWrap());
+
+        finderText = text("Поиск источника: снимаю стартовую базу...", 14, true);
+        finderText.setPadding(dp(8), dp(4), dp(8), dp(4));
+        finderText.setBackgroundColor(Color.rgb(227, 242, 253));
+        root.addView(finderText, lpMatchWrap());
 
         saText = text("SA: заводской mapping = CH5; живые данные ещё не получены", 20, true);
         saText.setPadding(dp(8), dp(5), dp(8), dp(5));
@@ -315,16 +421,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             UsbSerialCp210x candidate = new UsbSerialCp210x(usbManager, device, new UsbSerialCp210x.Listener() {
                 @Override
                 public void onBytes(byte[] data, int len) {
-                    usbRxBytes += len;
-                    usbRxChunks++;
-                    if (usbRxChunks <= 20 || (usbRxChunks % 100) == 0) {
-                        byte[] shown = data;
-                        if (len > 96) shown = Arrays.copyOf(data, 96);
-                        appendLog("USB RX chunk=" + usbRxChunks + " len=" + len
-                                + " total=" + usbRxBytes + " hex=" + SiyiProtocol.hex(shown)
-                                + (len > shown.length ? " ..." : ""));
-                    }
-                    parser.append(data, len);
+                    ingestBytes("USB", data, len);
                 }
 
                 @Override
@@ -356,63 +453,380 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         });
     }
 
+
+    private String selectedTransport() {
+        Object selected = transportSpinner == null ? null : transportSpinner.getSelectedItem();
+        return selected == null ? TRANSPORT_AUTO : String.valueOf(selected);
+    }
+
+    private int udpPort() {
+        try {
+            int p = Integer.parseInt(udpPortEdit.getText().toString().trim());
+            if (p < 1 || p > 65535) throw new NumberFormatException();
+            return p;
+        } catch (Throwable t) {
+            return 19856;
+        }
+    }
+
+    private void connectSelectedTransport() {
+        String selected = selectedTransport();
+        appendLog("Подключение транспорта: " + selected);
+
+        if (TRANSPORT_USB.equals(selected)) {
+            connectUsb();
+            return;
+        }
+
+        if (TRANSPORT_INPUT.equals(selected)) {
+            setStatus("Android Input: пассивное наблюдение включено");
+            captureFinderBaseline("Android Input активирован");
+            return;
+        }
+
+        if (TRANSPORT_AUTO.equals(selected)) {
+            connectUsb();
+            worker.submit(() -> {
+                try {
+                    researchTransports.connectUdp(
+                            udpHostEdit.getText().toString().trim(), udpPort(), udpPort());
+                } catch (Throwable t) {
+                    appendLog("AUTO UDP: " + stackSummary(t));
+                }
+                try {
+                    researchTransports.connectRaw("/dev/ttyHS0");
+                } catch (Throwable t) {
+                    appendLog("AUTO UART: " + stackSummary(t));
+                }
+                try {
+                    researchTransports.connectBluetoothAsync();
+                } catch (Throwable t) {
+                    appendLog("AUTO Bluetooth: " + stackSummary(t));
+                }
+                captureFinderBaseline("AUTO transports подключены");
+            });
+            return;
+        }
+
+        worker.submit(() -> {
+            try {
+                if (TRANSPORT_UDP.equals(selected)) {
+                    researchTransports.connectUdp(
+                            udpHostEdit.getText().toString().trim(), udpPort(), udpPort());
+                } else if (TRANSPORT_BLUETOOTH.equals(selected)) {
+                    researchTransports.connectBluetoothAsync();
+                } else if (TRANSPORT_UART.equals(selected)) {
+                    researchTransports.connectRaw("/dev/ttyHS0");
+                }
+                captureFinderBaseline("транспорт " + selected + " подключён");
+            } catch (Throwable t) {
+                appendLog(selected + ": подключение не удалось — " + stackSummary(t));
+                runOnUiThread(() -> setStatus(selected + ": подключение не удалось"));
+            }
+        });
+    }
+
+    private void disconnectAllTransports() {
+        if (streamEnabled) stopRcStream(false);
+        closeSerial();
+        if (researchTransports != null) researchTransports.stopAll();
+        setStatus("Все активные транспорты отключены");
+        appendLog("Все активные транспорты отключены.");
+    }
+
+    private boolean ensureSelectedTransport() {
+        String selected = selectedTransport();
+        if (TRANSPORT_INPUT.equals(selected)) {
+            Toast.makeText(this, "Android Input — пассивный источник; команды SIYI ему не отправляются.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+        if (TRANSPORT_AUTO.equals(selected)) {
+            if (hasAnyWritableTransport()) return true;
+            Toast.makeText(this, "В AUTO пока нет записываемого транспорта. Нажмите «Подключить».",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+        if (TRANSPORT_USB.equals(selected)) {
+            if (serial != null && serial.isOpen()) return true;
+            Toast.makeText(this, "Сначала подключите USB COM.", Toast.LENGTH_LONG).show();
+            return false;
+        }
+
+        String source = sourceForSelection(selected);
+        if (source != null && researchTransports != null && researchTransports.isWritable(source)) {
+            return true;
+        }
+
+        Toast.makeText(this, "Сначала подключите выбранный транспорт.", Toast.LENGTH_LONG).show();
+        return false;
+    }
+
+    private boolean hasAnyWritableTransport() {
+        if (serial != null && serial.isOpen()) return true;
+        if (researchTransports == null) return false;
+        return researchTransports.isWritable(ResearchTransports.UDP)
+                || researchTransports.isWritable(ResearchTransports.BLUETOOTH)
+                || researchTransports.isWritable(ResearchTransports.UART);
+    }
+
+    private String sourceForSelection(String selection) {
+        if (TRANSPORT_UDP.equals(selection)) return ResearchTransports.UDP;
+        if (TRANSPORT_BLUETOOTH.equals(selection)) return ResearchTransports.BLUETOOTH;
+        if (TRANSPORT_UART.equals(selection)) return ResearchTransports.UART;
+        return null;
+    }
+
+    private boolean sendSelectedFrame(byte[] frame, String label) {
+        String selected = selectedTransport();
+        boolean sent = false;
+
+        if (TRANSPORT_USB.equals(selected)) {
+            return sendFrame(frame, label);
+        }
+
+        if (TRANSPORT_AUTO.equals(selected)) {
+            if (serial != null && serial.isOpen()) {
+                sent |= sendFrame(frame, label == null ? null : label + " [USB]");
+            }
+            sent |= sendResearchFrame(ResearchTransports.UDP, frame, label);
+            sent |= sendResearchFrame(ResearchTransports.BLUETOOTH, frame, label);
+            sent |= sendResearchFrame(ResearchTransports.UART, frame, label);
+            return sent;
+        }
+
+        String source = sourceForSelection(selected);
+        if (source != null) return sendResearchFrame(source, frame, label);
+        return false;
+    }
+
+    private boolean sendResearchFrame(String source, byte[] frame, String label) {
+        if (researchTransports == null || !researchTransports.isWritable(source)) return false;
+        try {
+            researchTransports.send(source, frame);
+            if (label != null) appendLog("TX " + source + " " + label + ": " + SiyiProtocol.hex(frame));
+            return true;
+        } catch (Throwable t) {
+            appendLog("TX " + source + ": " + stackSummary(t));
+            return false;
+        }
+    }
+
+    private void ingestBytes(String source, byte[] data, int len) {
+        if (data == null || len <= 0) return;
+
+        byte[] shown = data;
+        if (len > 96) shown = Arrays.copyOf(data, 96);
+        String hex = SiyiProtocol.hex(shown) + (len > shown.length ? " ..." : "");
+
+        if ("USB".equals(source)) {
+            usbRxBytes += len;
+            usbRxChunks++;
+            usbLastHex = hex;
+            if (usbRxChunks <= 30 || (usbRxChunks % 100) == 0) {
+                appendLog("USB RX chunk=" + usbRxChunks + " len=" + len
+                        + " total=" + usbRxBytes + " hex=" + hex);
+            }
+            parser.append(data, len);
+            return;
+        }
+
+        SiyiProtocol.Parser p = extraParsers.get(source);
+        if (p == null) {
+            final String parserSource = source;
+            SiyiProtocol.Parser created = new SiyiProtocol.Parser(new SiyiProtocol.FrameListener() {
+                @Override
+                public void onFrame(SiyiProtocol.Frame frame) {
+                    handleSiyiFrame(parserSource, frame);
+                }
+
+                @Override
+                public void onBadCrc(byte[] candidate) {
+                    appendLog(parserSource + ": CRC не совпал: " + SiyiProtocol.hex(candidate));
+                }
+            });
+            SiyiProtocol.Parser previous = extraParsers.putIfAbsent(source, created);
+            p = previous == null ? created : previous;
+        }
+        p.append(data, len);
+    }
+
+    private AtomicLong counter(String key) {
+        AtomicLong existing = inputProbeCounters.get(key);
+        if (existing != null) return existing;
+        AtomicLong created = new AtomicLong();
+        AtomicLong previous = inputProbeCounters.putIfAbsent(key, created);
+        return previous == null ? created : previous;
+    }
+
+    private Map<String, String> captureProbeSnapshot() {
+        Map<String, String> out = new TreeMap<>();
+
+        out.put("transport.selected", selectedTransport());
+        out.put("transport.usb.connected", String.valueOf(serial != null && serial.isOpen()));
+        out.put("transport.usb.rxBytes", String.valueOf(usbRxBytes));
+        out.put("transport.usb.rxChunks", String.valueOf(usbRxChunks));
+        out.put("transport.usb.txBytes", String.valueOf(usbTxBytes));
+        out.put("transport.usb.lastHex", usbLastHex);
+
+        if (researchTransports != null) out.putAll(researchTransports.snapshot());
+
+        for (Map.Entry<String, String> e : inputProbeState.entrySet()) {
+            out.put(e.getKey(), e.getValue());
+        }
+        for (Map.Entry<String, AtomicLong> e : inputProbeCounters.entrySet()) {
+            out.put(e.getKey(), String.valueOf(e.getValue().get()));
+        }
+
+        for (Map.Entry<String, int[]> e : rcBySource.entrySet()) {
+            int[] values = e.getValue();
+            for (int i = 0; i < values.length && i < CHANNEL_COUNT; i++) {
+                out.put(String.format(Locale.US, "rc.%s.ch%02d", e.getKey(), i + 1),
+                        String.valueOf(values[i]));
+            }
+        }
+
+        for (int i = 0; i < CHANNEL_COUNT; i++) {
+            if (channelValue[i] >= 0) {
+                out.put(String.format(Locale.US, "rc.last.ch%02d", i + 1),
+                        String.valueOf(channelValue[i]));
+            }
+        }
+        out.put("rc.last.source", lastRcSource);
+
+        out.putAll(SystemProbe.collectDynamic());
+        return out;
+    }
+
+    private void captureFinderBaseline(String reason) {
+        worker.submit(() -> {
+            try {
+                Map<String, String> snapshot = captureProbeSnapshot();
+                probeDiff.setBaseline(snapshot);
+                appendLog("Switch Finder: база снята (" + reason + "), ключей=" + snapshot.size());
+                runOnUiThread(() -> finderText.setText(
+                        "База снята: " + snapshot.size()
+                                + " источников/значений. Переключите SA в другое положение и нажмите «сравнить»."
+                ));
+            } catch (Throwable t) {
+                appendLog("Switch Finder: база не снята — " + stackSummary(t));
+            }
+        });
+    }
+
+    private void compareFinderSnapshot() {
+        worker.submit(() -> {
+            try {
+                Map<String, String> snapshot = captureProbeSnapshot();
+                if (!probeDiff.hasBaseline()) {
+                    probeDiff.setBaseline(snapshot);
+                    runOnUiThread(() -> finderText.setText(
+                            "Базы не было — текущий снимок сохранён как база. Теперь переключите SA и сравните ещё раз."));
+                    return;
+                }
+
+                ProbeDiffEngine.Result result = probeDiff.compare(snapshot);
+                String formatted = formatFinderResult(result);
+                appendLog("Switch Finder round " + result.round + ": changed=" + result.changes.size());
+                runOnUiThread(() -> finderText.setText(formatted));
+            } catch (Throwable t) {
+                appendLog("Switch Finder: сравнение не удалось — " + stackSummary(t));
+            }
+        });
+    }
+
+    private String formatFinderResult(ProbeDiffEngine.Result result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Раунд ").append(result.round)
+                .append(": изменилось ").append(result.changes.size()).append(" значений. ");
+
+        if (result.changes.isEmpty()) {
+            sb.append("Явных изменений нет. Переключите SA в другое положение и повторите.");
+            return sb.toString();
+        }
+
+        sb.append("Лучшие кандидаты: ");
+        int limit = Math.min(8, result.candidates.size());
+        for (int i = 0; i < limit; i++) {
+            ProbeDiffEngine.Candidate c = result.candidates.get(i);
+            if (i > 0) sb.append(" | ");
+            sb.append(c.key)
+                    .append(" [").append(c.hits).append('/').append(c.rounds)
+                    .append(", score=").append(String.format(Locale.US, "%.1f", c.score))
+                    .append("] ")
+                    .append(shortValue(c.before)).append("→").append(shortValue(c.after));
+        }
+
+        sb.append(". Переключите SA ещё раз в другое положение и снова нажмите «сравнить»; ")
+                .append("источник, который меняется во всех раундах, поднимется наверх.");
+        return sb.toString();
+    }
+
+    private String shortValue(String value) {
+        if (value == null) return "∅";
+        if (value.length() <= 28) return value;
+        return value.substring(0, 25) + "...";
+    }
+
+    private void resetFinder() {
+        probeDiff.reset();
+        finderText.setText("Поиск сброшен. Нажмите «1. Снять базу», затем переключите SA.");
+        appendLog("Switch Finder: поиск сброшен.");
+    }
+
     private void requestMapping() {
-        if (!ensureSerial()) return;
-        worker.submit(() -> sendFrame(SiyiProtocol.mappingRequest(nextSeq()), "0x48 запрос всех mapping"));
+        if (!ensureSelectedTransport()) return;
+        worker.submit(() -> sendSelectedFrame(SiyiProtocol.mappingRequest(nextSeq()), "0x48 запрос всех mapping"));
     }
 
     private void requestInfo() {
-        if (!ensureSerial()) return;
+        if (!ensureSelectedTransport()) return;
         worker.submit(() -> {
-            sendFrame(SiyiProtocol.request(SiyiProtocol.CMD_HARDWARE_ID, new byte[0], nextSeq()), "0x40 hardware ID");
+            sendSelectedFrame(SiyiProtocol.request(SiyiProtocol.CMD_HARDWARE_ID, new byte[0], nextSeq()), "0x40 hardware ID");
             sleepQuiet(80);
-            sendFrame(SiyiProtocol.request(SiyiProtocol.CMD_FIRMWARE_VERSION, new byte[0], nextSeq()), "0x47 версии прошивок");
+            sendSelectedFrame(SiyiProtocol.request(SiyiProtocol.CMD_FIRMWARE_VERSION, new byte[0], nextSeq()), "0x47 версии прошивок");
             sleepQuiet(80);
-            sendFrame(SiyiProtocol.request(SiyiProtocol.CMD_DATALINK_STATUS, new byte[0], nextSeq()), "0x43 состояние datalink");
+            sendSelectedFrame(SiyiProtocol.request(SiyiProtocol.CMD_DATALINK_STATUS, new byte[0], nextSeq()), "0x43 состояние datalink");
             sleepQuiet(80);
-            sendFrame(SiyiProtocol.request(SiyiProtocol.CMD_IMAGE_LINK_STATUS, new byte[0], nextSeq()), "0x44 состояние видеолинии");
+            sendSelectedFrame(SiyiProtocol.request(SiyiProtocol.CMD_IMAGE_LINK_STATUS, new byte[0], nextSeq()), "0x44 состояние видеолинии");
         });
     }
 
     private void startRcStream() {
-        if (!ensureSerial()) return;
+        if (!ensureSelectedTransport()) return;
         worker.submit(() -> {
-            // SIYI для этого класса протокола рекомендует подряд повторять команду запуска/остановки.
             int seq = nextSeq();
-            byte[] frame = SiyiProtocol.channelStreamRequest(2, seq); // 4 Гц
-            appendLog("RC: включаем поток 4 Гц командой 0x42 (три одинаковых отправки).\nTX: " + SiyiProtocol.hex(frame));
+            byte[] frame = SiyiProtocol.channelStreamRequest(2, seq);
+            appendLog("RC: включаем поток 4 Гц командой 0x42 через выбранный транспорт (три отправки).\nTX: " + SiyiProtocol.hex(frame));
             boolean ok = true;
             for (int i = 0; i < 3; i++) {
-                if (!sendFrame(frame, null)) ok = false;
+                if (!sendSelectedFrame(frame, null)) ok = false;
                 sleepQuiet(60);
             }
             streamEnabled = ok;
             if (ok) {
-                runOnUiThread(() -> setStatus("USB COM: RC-поток 4 Гц включён"));
-                // Mapping нужен, чтобы найти SA даже если пользователь переназначил каналы.
-                sendFrame(SiyiProtocol.mappingRequest(nextSeq()), "0x48 контроль mapping после запуска");
+                runOnUiThread(() -> setStatus("RC-поток 4 Гц включён через " + selectedTransport()));
+                sendSelectedFrame(SiyiProtocol.mappingRequest(nextSeq()), "0x48 контроль mapping после запуска");
             }
         });
     }
 
     private void stopRcStream(boolean userInitiated) {
-        if (serial == null || !serial.isOpen()) {
+        if (!hasAnyWritableTransport()) {
             streamEnabled = false;
-            if (userInitiated) appendLog("RC: поток уже не подключён.");
+            if (userInitiated) appendLog("RC: нет подключённого записываемого транспорта.");
             return;
         }
         worker.submit(() -> {
             int seq = nextSeq();
             byte[] frame = SiyiProtocol.channelStreamRequest(0, seq);
-            if (userInitiated) appendLog("RC: выключаем поток 0x42 (три одинаковых отправки).\nTX: " + SiyiProtocol.hex(frame));
+            if (userInitiated) appendLog("RC: выключаем поток 0x42 (три отправки).\nTX: " + SiyiProtocol.hex(frame));
             for (int i = 0; i < 3; i++) {
-                sendFrame(frame, null);
+                sendSelectedFrame(frame, null);
                 sleepQuiet(60);
             }
             streamEnabled = false;
-            runOnUiThread(() -> setStatus(serial != null && serial.isOpen()
-                    ? "USB COM: подключён; RC-поток выключен"
-                    : "USB COM: не подключён"));
+            runOnUiThread(() -> setStatus("RC-поток выключен"));
         });
     }
 
@@ -431,7 +845,8 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         }
         try {
             s.write(frame);
-            if (label != null) appendLog("TX " + label + ": " + SiyiProtocol.hex(frame));
+            usbTxBytes += frame.length;
+            if (label != null) appendLog("TX USB " + label + ": " + SiyiProtocol.hex(frame));
             return true;
         } catch (Throwable t) {
             appendLog((label == null ? "TX" : label) + ": ошибка отправки — " + stackSummary(t));
@@ -441,15 +856,19 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
 
     @Override
     public void onFrame(SiyiProtocol.Frame frame) {
+        handleSiyiFrame("USB", frame);
+    }
+
+    private void handleSiyiFrame(String source, SiyiProtocol.Frame frame) {
         validSiyiFrames++;
-        if (validSiyiFrames <= 20 || (validSiyiFrames % 100) == 0) {
-            appendLog("SIYI frame #" + validSiyiFrames + " cmd=0x"
+        if (validSiyiFrames <= 40 || (validSiyiFrames % 100) == 0) {
+            appendLog("SIYI " + source + " frame #" + validSiyiFrames + " cmd=0x"
                     + String.format(Locale.US, "%02X", frame.cmdId)
                     + " seq=" + frame.seq + " dataLen=" + frame.data.length);
         }
         switch (frame.cmdId) {
             case SiyiProtocol.CMD_CHANNEL_DATA:
-                handleChannelFrame(frame.data);
+                handleChannelFrame(source, frame.data);
                 break;
             case SiyiProtocol.CMD_ALL_CHANNEL_MAPPINGS:
                 handleMappingFrame(frame.data);
@@ -467,7 +886,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 appendLog("RX 0x44 image link: " + SiyiProtocol.hex(frame.data));
                 break;
             default:
-                appendLog("RX cmd=0x" + String.format(Locale.US, "%02X", frame.cmdId)
+                appendLog("RX " + source + " cmd=0x" + String.format(Locale.US, "%02X", frame.cmdId)
                         + " seq=" + frame.seq + " data=" + SiyiProtocol.hex(frame.data));
         }
     }
@@ -477,7 +896,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         appendLog("RX: CRC не совпал, отброшен кадр: " + SiyiProtocol.hex(candidate));
     }
 
-    private void handleChannelFrame(byte[] data) {
+    private void handleChannelFrame(String source, byte[] data) {
         if (data.length < 32) {
             appendLog("RX 0x42: короткий ответ " + data.length + " байт: " + SiyiProtocol.hex(data));
             return;
@@ -485,6 +904,8 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         int[] values = new int[CHANNEL_COUNT];
         for (int i = 0; i < CHANNEL_COUNT; i++) values[i] = SiyiProtocol.u16le(data, i * 2);
         System.arraycopy(values, 0, channelValue, 0, CHANNEL_COUNT);
+        rcBySource.put(source.toLowerCase(Locale.US), Arrays.copyOf(values, values.length));
+        lastRcSource = source;
 
         runOnUiThread(() -> {
             for (int i = 0; i < CHANNEL_COUNT; i++) {
@@ -494,7 +915,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             }
             int saValue = saChannelIndex >= 0 && saChannelIndex < CHANNEL_COUNT ? values[saChannelIndex] : -1;
             String mappingNote = mappingReceived ? "по фактическому mapping 0x48" : "по заводскому CH5; mapping 0x48 ещё не подтверждён";
-            saText.setText("SA → CH" + (saChannelIndex + 1) + " = " + saValue + "  (" + mappingNote + ")");
+            saText.setText("SA → CH" + (saChannelIndex + 1) + " = " + saValue + "  [" + source + "] (" + mappingNote + ")");
             saText.setBackgroundColor(Color.rgb(200, 230, 201));
         });
     }
@@ -591,6 +1012,10 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() == KeyEvent.ACTION_DOWN || event.getAction() == KeyEvent.ACTION_UP) {
+            String base = "input.key.dev" + event.getDeviceId() + ".scan" + event.getScanCode();
+            inputProbeState.put(base + ".state",
+                    event.getAction() + ":" + event.getKeyCode());
+            counter(base + ".eventCount").incrementAndGet();
             appendLog("Android KeyEvent: action=" + event.getAction()
                     + " keyCode=" + event.getKeyCode()
                     + " scanCode=" + event.getScanCode()
@@ -611,6 +1036,12 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 for (InputDevice.MotionRange r : device.getMotionRanges()) {
                     if ((r.getSource() & source) == 0) continue;
                     float value = event.getAxisValue(r.getAxis());
+                    String key = "input.motion.dev" + event.getDeviceId() + ".axis" + r.getAxis();
+                    String formatted = String.format(Locale.US, "%.5f", value);
+                    String previous = inputProbeState.put(key + ".value", formatted);
+                    if (previous == null || !previous.equals(formatted)) {
+                        counter(key + ".eventCount").incrementAndGet();
+                    }
                     if (Math.abs(value) > 0.0001f) {
                         sb.append(" axis").append(r.getAxis()).append('=').append(String.format(Locale.US, "%.3f", value));
                     }
@@ -635,7 +1066,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                 String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
                 File file = new File(dir, "MK15_PortInspector_" + ts + ".txt");
                 try (FileWriter fw = new FileWriter(file)) {
-                    fw.write("MK15 Port Inspector 1.0.1\n\n");
+                    fw.write("MK15 Port Inspector 1.1.0\n\n");
                     fw.write(scan);
                     fw.write("\n\n=== Журнал сеанса ===\n");
                     fw.write(log);
@@ -656,7 +1087,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
             if (!dir.exists()) dir.mkdirs();
             runtimeLogFile = new File(dir, "MK15_PortInspector_runtime.log");
             try (FileWriter fw = new FileWriter(runtimeLogFile, false)) {
-                fw.write("MK15 Port Inspector 1.0.1 runtime log\n");
+                fw.write("MK15 Port Inspector 1.1.0 runtime log\n");
                 fw.write("Started: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date()) + "\n");
                 fw.write("Path: " + runtimeLogFile.getAbsolutePath() + "\n\n");
             }
@@ -745,6 +1176,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
         }
         streamEnabled = false;
         closeSerial();
+        if (researchTransports != null) researchTransports.stopAll();
         worker.shutdownNow();
         try { unregisterReceiver(usbPermissionReceiver); } catch (Throwable ignored) {}
         super.onDestroy();

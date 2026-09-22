@@ -48,9 +48,11 @@ try {
     $Javac = Join-Path $JavaHome 'bin\javac.exe'
     $Java = Join-Path $JavaHome 'bin\java.exe'
     $ProtocolSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\SiyiProtocol.java'
+    $DiffSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ProbeDiffEngine.java'
     $ProtocolTest = Join-Path $Root 'host-tests\ProtocolSelfTest.java'
+    $DiffTest = Join-Path $Root 'host-tests\ProbeDiffSelfTest.java'
 
-    & $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $ProtocolTest
+    & $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $DiffSource $ProtocolTest $DiffTest
     if ($LASTEXITCODE -ne 0) {
         throw ('javac returned exit code ' + $LASTEXITCODE)
     }
@@ -58,6 +60,11 @@ try {
     & $Java -cp $HostBuild ProtocolSelfTest
     if ($LASTEXITCODE -ne 0) {
         throw ('ProtocolSelfTest returned exit code ' + $LASTEXITCODE)
+    }
+
+    & $Java -cp $HostBuild ProbeDiffSelfTest
+    if ($LASTEXITCODE -ne 0) {
+        throw ('ProbeDiffSelfTest returned exit code ' + $LASTEXITCODE)
     }
 
     $Rc = 0

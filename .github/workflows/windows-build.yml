@@ -59,8 +59,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ".host-test-build" | Out-Null
-          javac -encoding UTF-8 -d ".host-test-build" "app/src/main/java/com/mk15/portinspector/SiyiProtocol.java" "host-tests/ProtocolSelfTest.java"
+          javac -encoding UTF-8 -d ".host-test-build" "app/src/main/java/com/mk15/portinspector/SiyiProtocol.java" "app/src/main/java/com/mk15/portinspector/ProbeDiffEngine.java" "host-tests/ProtocolSelfTest.java" "host-tests/ProbeDiffSelfTest.java"
           java -cp ".host-test-build" ProtocolSelfTest
+          java -cp ".host-test-build" ProbeDiffSelfTest
 
       - name: Build debug APK
         shell: pwsh
@@ -71,14 +72,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "out" | Out-Null
-          Copy-Item "app/build/outputs/apk/debug/app-debug.apk" "out/MK15PortInspector-1.0.1-debug.apk"
-          Get-FileHash -Algorithm SHA256 "out/MK15PortInspector-1.0.1-debug.apk" | Format-List | Out-File "out/SHA256.txt"
+          Copy-Item "app/build/outputs/apk/debug/app-debug.apk" "out/MK15PortInspector-1.1.0-debug.apk"
+          Get-FileHash -Algorithm SHA256 "out/MK15PortInspector-1.1.0-debug.apk" | Format-List | Out-File "out/SHA256.txt"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MK15PortInspector-1.0.1-debug
+          name: MK15PortInspector-1.1.0-debug
           path: |
-            out/MK15PortInspector-1.0.1-debug.apk
+            out/MK15PortInspector-1.1.0-debug.apk
             out/SHA256.txt
           if-no-files-found: error
