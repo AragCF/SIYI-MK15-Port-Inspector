@@ -10,6 +10,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -54,6 +55,7 @@ public final class ResearchTransports {
         final AtomicLong rxChunks = new AtomicLong();
         final AtomicLong txBytes = new AtomicLong();
         volatile String status = "disconnected";
+        volatile String config = "";
         volatile String lastHex = "";
         volatile boolean running;
         volatile Thread thread;
@@ -131,6 +133,12 @@ public final class ResearchTransports {
         if (!file.exists()) throw new Exception(path + " does not exist");
         if (!file.canRead()) throw new SecurityException(path + " is not readable by this APK");
 
+        String serialConfig = "";
+        if (UART0.equals(source)) {
+            serialConfig = configureSerialRaw(path, 115200);
+            info(source, "UART SDK setup " + path + " 115200 raw: " + serialConfig);
+        }
+
         final FileInputStream input = new FileInputStream(file);
         FileOutputStream output = null;
         if (file.canWrite()) {
@@ -144,6 +152,7 @@ public final class ResearchTransports {
         final FileOutputStream finalOutput = output;
         final Session session = new Session(source);
         session.running = true;
+        session.config = serialConfig;
         session.status = "connected " + path + (finalOutput == null ? " read-only" : " read/write");
         session.closer = input;
         if (finalOutput != null) {
@@ -314,6 +323,7 @@ public final class ResearchTransports {
                 continue;
             }
             out.put(p + "status", s.status);
+            out.put(p + "config", s.config);
             out.put(p + "rxBytes", String.valueOf(s.rxBytes.get()));
             out.put(p + "rxChunks", String.valueOf(s.rxChunks.get()));
             out.put(p + "txBytes", String.valueOf(s.txBytes.get()));
@@ -362,6 +372,69 @@ public final class ResearchTransports {
             return n == null ? "(unnamed)" : n;
         } catch (Throwable t) {
             return "(name unavailable)";
+        }
+    }
+
+    private static String configureSerialRaw(String path, int baud) {
+        String safePath = path == null ? "" : path;
+        if (!safePath.matches("/dev/ttyHS[0-9]+")) {
+            return "skipped: unsupported path";
+        }
+
+        String args = safePath + " " + baud + " raw -echo -ixon -ixoff -icrnl -inlcr -opost";
+        String[] commands = {
+                "stty -F " + args,
+                "toybox stty -F " + args,
+                "/system/bin/toybox stty -F " + args
+        };
+
+        StringBuilder result = new StringBuilder();
+        for (String command : commands) {
+            ShellResult shell = runShell(command);
+            if (result.length() > 0) result.append(" | ");
+            result.append("[").append(command).append("] rc=").append(shell.code);
+            if (!shell.output.isEmpty()) result.append(" out=").append(shell.output);
+            if (shell.code == 0) return result.toString();
+        }
+        return result.toString();
+    }
+
+    private static final class ShellResult {
+        final int code;
+        final String output;
+
+        ShellResult(int code, String output) {
+            this.code = code;
+            this.output = output == null ? "" : output;
+        }
+    }
+
+    private static ShellResult runShell(String command) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder("sh", "-c", command)
+                    .redirectErrorStream(true)
+                    .start();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            InputStream in = process.getInputStream();
+            byte[] buffer = new byte[512];
+            int total = 0;
+            int n;
+            while ((n = in.read(buffer)) >= 0 && total < 4096) {
+                if (n == 0) continue;
+                int keep = Math.min(n, 4096 - total);
+                out.write(buffer, 0, keep);
+                total += keep;
+            }
+            int code = process.waitFor();
+            String text = new String(out.toByteArray()).trim().replace('\n', ' ');
+            return new ShellResult(code, text);
+        } catch (Throwable t) {
+            return new ShellResult(-999, t.getClass().getSimpleName() + ": " + t.getMessage());
+        } finally {
+            if (process != null) {
+                try { process.destroy(); } catch (Throwable ignored) {}
+            }
         }
     }
 
