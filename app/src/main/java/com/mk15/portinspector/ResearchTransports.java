@@ -129,6 +129,11 @@ public final class ResearchTransports {
 
     public synchronized void connectRaw(final String source, final String path) throws Exception {
         stop(source);
+        if (UART0.equals(source)) {
+            connectUart0Bridge(path);
+            return;
+        }
+
         final File file = new File(path);
         if (!file.exists()) throw new Exception(path + " does not exist");
         if (!file.canRead()) throw new SecurityException(path + " is not readable by this APK");
@@ -143,18 +148,10 @@ public final class ResearchTransports {
             }
         }
 
-        String serialConfig = "";
-        if (UART0.equals(source)) {
-            // Important: configure after Java opened the TTY. On this MK15 the driver
-            // restores termios defaults when the first stream is opened.
-            serialConfig = configureSerialRaw(path, 115200);
-            info(source, "UART SDK setup AFTER open " + path + " 115200 raw: " + serialConfig);
-        }
-
         final FileOutputStream finalOutput = output;
         final Session session = new Session(source);
         session.running = true;
-        session.config = serialConfig;
+        session.config = "direct file mode";
         session.status = "connected " + path + (finalOutput == null ? " read-only" : " read/write");
         session.closer = input;
         if (finalOutput != null) {
@@ -190,6 +187,119 @@ public final class ResearchTransports {
             }
         }, "mk15-" + source.toLowerCase() + "-reader");
         session.thread.start();
+    }
+
+    private void connectUart0Bridge(final String path) throws Exception {
+        final File file = new File(path);
+        if (!file.exists()) throw new Exception(path + " does not exist");
+        if (!file.canRead() || !file.canWrite()) {
+            throw new SecurityException(path + " must be readable and writable");
+        }
+        if (!"/dev/ttyHS0".equals(path)) {
+            throw new IllegalArgumentException("UART0 bridge only supports /dev/ttyHS0");
+        }
+
+        final String flags = "115200 raw -echo -ixon -ixoff -ixany -icrnl -inlcr -opost "
+                + "-iuclc -istrip -inpck -ignpar -parmrk -iutf8 cs8 -parenb -cstopb";
+
+        final String script =
+                "exec 3<>/dev/ttyHS0 || exit 41\n"
+                + "(stty " + flags + " <&3"
+                + " || toybox stty " + flags + " <&3"
+                + " || /system/bin/toybox stty " + flags + " <&3) || exit 42\n"
+                + "echo __MK15_STTY_BEGIN__ >&2\n"
+                + "(stty -a <&3 || toybox stty -a <&3 || /system/bin/toybox stty -a <&3) >&2\n"
+                + "echo __MK15_STTY_END__ >&2\n"
+                + "cat >&3 &\n"
+                + "exec cat <&3\n";
+
+        final Process process = new ProcessBuilder("sh", "-c", script)
+                .redirectErrorStream(false)
+                .start();
+
+        final InputStream serialInput = process.getInputStream();
+        final OutputStream serialOutput = process.getOutputStream();
+        final InputStream diagnostics = process.getErrorStream();
+
+        final Session session = new Session(UART0);
+        session.running = true;
+        session.status = "connected /dev/ttyHS0 via same-FD shell bridge 115200 raw";
+        session.config = "bridge starting";
+        session.sender = data -> {
+            serialOutput.write(data);
+            serialOutput.flush();
+            session.txBytes.addAndGet(data.length);
+        };
+        session.closer = new Closeable() {
+            @Override
+            public void close() {
+                session.running = false;
+                try { serialOutput.close(); } catch (Throwable ignored) {}
+                try { serialInput.close(); } catch (Throwable ignored) {}
+                try { diagnostics.close(); } catch (Throwable ignored) {}
+                try { process.destroy(); } catch (Throwable ignored) {}
+            }
+        };
+        sessions.put(UART0, session);
+
+        final StringBuilder diag = new StringBuilder();
+        Thread diagThread = new Thread(() -> {
+            byte[] buf = new byte[512];
+            try {
+                int n;
+                while (session.running && (n = diagnostics.read(buf)) >= 0) {
+                    if (n == 0) continue;
+                    String part = new String(buf, 0, n);
+                    synchronized (diag) {
+                        if (diag.length() < 8192) {
+                            int keep = Math.min(part.length(), 8192 - diag.length());
+                            diag.append(part, 0, keep);
+                            session.config = diag.toString().replace('\n', ' ').trim();
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                if (session.running) info(UART0, "bridge diagnostics ended: " + t.getClass().getSimpleName());
+            }
+        }, "mk15-uart0-bridge-diagnostics");
+        diagThread.start();
+
+        session.thread = new Thread(() -> {
+            byte[] buffer = new byte[2048];
+            info(UART0, session.status);
+            try {
+                while (session.running) {
+                    int n = serialInput.read(buffer);
+                    if (n < 0) break;
+                    if (n == 0) continue;
+                    byte[] copy = Arrays.copyOf(buffer, n);
+                    recordRx(session, copy, n);
+                    if (listener != null) listener.onBytes(UART0, copy, n);
+                }
+            } catch (Throwable t) {
+                if (session.running) error(UART0, "UART0 same-FD bridge read failed", t);
+            } finally {
+                session.running = false;
+                try { serialOutput.close(); } catch (Throwable ignored) {}
+                try { serialInput.close(); } catch (Throwable ignored) {}
+                try { diagnostics.close(); } catch (Throwable ignored) {}
+                try { process.destroy(); } catch (Throwable ignored) {}
+                session.status = "disconnected";
+            }
+        }, "mk15-uart0-same-fd-reader");
+        session.thread.start();
+
+        Thread.sleep(180);
+        try {
+            int code = process.exitValue();
+            sessions.remove(UART0);
+            String message;
+            synchronized (diag) { message = diag.toString().trim(); }
+            throw new Exception("UART0 bridge exited early rc=" + code
+                    + (message.isEmpty() ? "" : " diagnostics=" + message));
+        } catch (IllegalThreadStateException stillRunning) {
+            // Expected: the bridge remains alive and owns fd3 for the whole session.
+        }
     }
 
     public synchronized void connectBluetoothAsync() throws Exception {

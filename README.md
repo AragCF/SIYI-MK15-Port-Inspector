@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.3.4.
+Current version: 1.3.5.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.3.4-debug.apk
+    out\MK15PortInspector-1.3.5-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -190,3 +190,18 @@ It also changes the RC experiment:
 - the start frame is sent three times;
 - no 0x48 or other SDK command is sent immediately after 0x42 while waiting for channel frames;
 - 4 Hz is tried first, 20 Hz only if no channel frames arrive.
+
+
+## Same-FD UART bridge 1.3.5
+
+The 1.3.4 hardware report proved that path-based `stty -F /dev/ttyHS0` cannot fix this MK15 UART: every new open of the character device restores vendor defaults, so a second `stty -a` still showed IUCLC/ISTRIP/input translations enabled.
+
+Version 1.3.5 changes the ownership model. A long-lived shell process:
+1. opens `/dev/ttyHS0` once as fd 3;
+2. applies 115200/raw and all binary flags to **that same open descriptor** via `stty ... <&3`;
+3. keeps fd 3 open for the complete session;
+4. bridges application writes to fd 3 and fd 3 reads back to the Java parser.
+
+This avoids reopening the TTY between configuration and data transfer.
+
+The active C/D sequence was also corrected so AUTO reconnect no longer sends an early 0x42 before the PRE-RC mapping. The central scenario alone controls: mapping -> wait -> three identical 0x42 requests.
