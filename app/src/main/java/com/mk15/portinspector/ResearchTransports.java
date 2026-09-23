@@ -383,12 +383,13 @@ public final class ResearchTransports {
             return "skipped: unsupported path";
         }
 
-        String strongArgs = safePath + " " + baud
-                + " raw -echo -ixon -ixoff -icrnl -inlcr -opost -iuclc cs8 -parenb -cstopb";
-        String fallbackArgs = safePath + " " + baud
-                + " raw -echo -ixon -ixoff -icrnl -inlcr -opost";
+        String binaryFlags = "-echo -ixon -ixoff -ixany -icrnl -inlcr -opost -iuclc "
+                + "-istrip -inpck -ignpar -parmrk -iutf8 cs8 -parenb -cstopb";
+        String strongArgs = safePath + " " + baud + " raw " + binaryFlags;
+        String fallbackArgs = safePath + " " + baud + " raw " + binaryFlags;
         String finalFix = "stty -F " + safePath
-                + " -iuclc -ixon -ixoff -icrnl -inlcr -opost";
+                + " -iuclc -ixon -ixoff -ixany -icrnl -inlcr -opost"
+                + " -istrip -inpck -ignpar -parmrk -iutf8 cs8 -parenb -cstopb";
         String[] commands = {
                 "stty -F " + strongArgs,
                 "toybox stty -F " + strongArgs,
@@ -413,8 +414,12 @@ public final class ResearchTransports {
 
                 String eff = effective.output == null ? "" : effective.output;
                 if (containsPositiveFlag(eff, "iuclc")) result.append(" | WARNING:iuclc=ON");
+                if (containsPositiveFlag(eff, "istrip")) result.append(" | WARNING:istrip=ON");
+                if (containsPositiveFlag(eff, "inpck")) result.append(" | WARNING:inpck=ON");
+                if (containsPositiveFlag(eff, "ignpar")) result.append(" | WARNING:ignpar=ON");
                 if (containsPositiveFlag(eff, "ixon")) result.append(" | WARNING:ixon=ON");
                 if (containsPositiveFlag(eff, "ixoff")) result.append(" | WARNING:ixoff=ON");
+                if (containsPositiveFlag(eff, "ixany")) result.append(" | WARNING:ixany=ON");
                 if (containsPositiveFlag(eff, "icrnl")) result.append(" | WARNING:icrnl=ON");
                 if (containsPositiveFlag(eff, "inlcr")) result.append(" | WARNING:inlcr=ON");
                 return result.toString();

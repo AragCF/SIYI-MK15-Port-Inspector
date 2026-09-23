@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.3.3.
+Current version: 1.3.4.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.3.3-debug.apk
+    out\MK15PortInspector-1.3.4-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -170,3 +170,23 @@ Version 1.3.2 explicitly disables IUCLC on ttyHS0 and also contains a CRC-valida
 The current project stops at the research boundary: identify the exact MK15 software path and channel semantics for C/D. A separate future drone/robot control application will consume the resulting specification; it is not part of this repository's current goal.
 
 The 1.3.2 hardware report confirmed the mapping but showed that effective termios still had IUCLC enabled after the Java streams were opened. Version 1.3.3 therefore configures ttyHS0 **after** opening the streams, verifies effective termios again, and starts the RC probe with SIYI's exact documented 4 Hz request before trying 20 Hz.
+
+
+## Binary-clean UART and isolated 0x42 probe 1.3.4
+
+The 1.3.3 hardware report revealed a second TTY transformation: effective termios still had **ISTRIP enabled**. This clears bit 7 of every incoming byte. The evidence is exact:
+
+- received mapping CRC bytes `35 2D`;
+- CRC calculated from the same frame is `B5 2D`;
+- `B5 & 0x7F = 35`.
+
+The next received mapping ended with `00 4A`, while its calculated CRC is `80 4A`. Again, bit 7 was stripped exactly.
+
+Version 1.3.4 explicitly disables `istrip` (plus parity/input transformations) after opening ttyHS0.
+
+It also changes the RC experiment:
+- mapping is requested **before** RC streaming;
+- the 0x42 start command uses SIYI's exact documented sequence=0 request;
+- the start frame is sent three times;
+- no 0x48 or other SDK command is sent immediately after 0x42 while waiting for channel frames;
+- 4 Hz is tried first, 20 Hz only if no channel frames arrive.
