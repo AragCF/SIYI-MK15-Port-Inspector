@@ -583,7 +583,7 @@ public final class MainActivity extends Activity implements SiyiProtocol.FrameLi
                     appendLog("AUTO Bluetooth: SIYI-подобного спаренного устройства нет; случайное Bluetooth-устройство не трогаем.");
                 }
                 captureFinderBaseline("AUTO transports подключены");
-                if (finderActive) activateFinderStreamOnAllWritable();
+                if (finderActive) activateFinderStreamOnAllWritable(2, "4Hz");
             });
             return;
         }
