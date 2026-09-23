@@ -188,3 +188,15 @@ received CRC   = 00 4A
 1.3.5 использует same-FD shell bridge: UART открывается один раз как fd3, `stty` применяется к fd3 через stdin redirection и этот же fd остаётся открыт для всего обмена.
 
 Также устранена гонка сценария, из-за которой AUTO мог отправить 0x42 до PRE-RC mapping.
+
+
+## CI версии 1.3.5
+
+GitHub Actions run `35917083657` — **success**.
+
+Подтверждено:
+- PowerShell 5.1 syntax check;
+- все host-tests;
+- Android Gradle build;
+- создание `MK15PortInspector-1.3.5-debug.apk`;
+- публикация артефакта.
