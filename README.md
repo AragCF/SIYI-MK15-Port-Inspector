@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.3.2.
+Current version: 1.3.3.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.3.2-debug.apk
+    out\MK15PortInspector-1.3.3-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -163,3 +163,10 @@ Restoring only those two bytes makes the recorded CRC exactly match (0xBB1D). Th
 - CH11 = type 1 / entity 3 = D.
 
 Version 1.3.2 explicitly disables IUCLC on ttyHS0 and also contains a CRC-validated recovery path for already lowercased SIYI frames. This gives us both a source fix and a defensive parser fallback.
+
+
+## Research goal correction and UART 1.3.3
+
+The current project stops at the research boundary: identify the exact MK15 software path and channel semantics for C/D. A separate future drone/robot control application will consume the resulting specification; it is not part of this repository's current goal.
+
+The 1.3.2 hardware report confirmed the mapping but showed that effective termios still had IUCLC enabled after the Java streams were opened. Version 1.3.3 therefore configures ttyHS0 **after** opening the streams, verifies effective termios again, and starts the RC probe with SIYI's exact documented 4 Hz request before trying 20 Hz.

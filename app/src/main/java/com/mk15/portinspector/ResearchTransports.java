@@ -133,12 +133,6 @@ public final class ResearchTransports {
         if (!file.exists()) throw new Exception(path + " does not exist");
         if (!file.canRead()) throw new SecurityException(path + " is not readable by this APK");
 
-        String serialConfig = "";
-        if (UART0.equals(source)) {
-            serialConfig = configureSerialRaw(path, 115200);
-            info(source, "UART SDK setup " + path + " 115200 raw: " + serialConfig);
-        }
-
         final FileInputStream input = new FileInputStream(file);
         FileOutputStream output = null;
         if (file.canWrite()) {
@@ -147,6 +141,14 @@ public final class ResearchTransports {
             } catch (Throwable t) {
                 info(source, path + " is readable but write open failed: " + t.getClass().getSimpleName());
             }
+        }
+
+        String serialConfig = "";
+        if (UART0.equals(source)) {
+            // Important: configure after Java opened the TTY. On this MK15 the driver
+            // restores termios defaults when the first stream is opened.
+            serialConfig = configureSerialRaw(path, 115200);
+            info(source, "UART SDK setup AFTER open " + path + " 115200 raw: " + serialConfig);
         }
 
         final FileOutputStream finalOutput = output;
@@ -385,6 +387,8 @@ public final class ResearchTransports {
                 + " raw -echo -ixon -ixoff -icrnl -inlcr -opost -iuclc cs8 -parenb -cstopb";
         String fallbackArgs = safePath + " " + baud
                 + " raw -echo -ixon -ixoff -icrnl -inlcr -opost";
+        String finalFix = "stty -F " + safePath
+                + " -iuclc -ixon -ixoff -icrnl -inlcr -opost";
         String[] commands = {
                 "stty -F " + strongArgs,
                 "toybox stty -F " + strongArgs,
@@ -399,13 +403,31 @@ public final class ResearchTransports {
             result.append("[").append(command).append("] rc=").append(shell.code);
             if (!shell.output.isEmpty()) result.append(" out=").append(shell.output);
             if (shell.code == 0) {
+                ShellResult fix = runShell(finalFix);
+                result.append(" | [").append(finalFix).append("] rc=").append(fix.code);
+                if (!fix.output.isEmpty()) result.append(" out=").append(fix.output);
+
                 ShellResult effective = runShell("stty -F " + safePath + " -a");
                 result.append(" | effective rc=").append(effective.code);
                 if (!effective.output.isEmpty()) result.append(" ").append(effective.output);
+
+                String eff = effective.output == null ? "" : effective.output;
+                if (containsPositiveFlag(eff, "iuclc")) result.append(" | WARNING:iuclc=ON");
+                if (containsPositiveFlag(eff, "ixon")) result.append(" | WARNING:ixon=ON");
+                if (containsPositiveFlag(eff, "ixoff")) result.append(" | WARNING:ixoff=ON");
+                if (containsPositiveFlag(eff, "icrnl")) result.append(" | WARNING:icrnl=ON");
+                if (containsPositiveFlag(eff, "inlcr")) result.append(" | WARNING:inlcr=ON");
                 return result.toString();
             }
         }
         return result.toString();
+    }
+
+    private static boolean containsPositiveFlag(String stty, String flag) {
+        if (stty == null || stty.isEmpty()) return false;
+        String normalized = " " + stty.replace(';', ' ').replace('\n', ' ') + " ";
+        return normalized.contains(" " + flag + " ")
+                && !normalized.contains(" -" + flag + " ");
     }
 
     private static final class ShellResult {
