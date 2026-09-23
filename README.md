@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.3.1.
+Current version: 1.3.2.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.3.1-debug.apk
+    out\MK15PortInspector-1.3.2-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -146,3 +146,20 @@ Version 1.3.1 therefore:
 - keeps ttyHS1/2 as experimental/passive sources and no longer sprays active SIYI commands to them in AUTO;
 - after an active C/D probe, explicitly warns on screen when no valid SIYI frame was received and asks the operator to check SIYI TX -> Datalink -> Connection;
 - stores UART configuration diagnostics and the valid SIYI frame count in reports.
+
+
+## UART IUCLC discovery 1.3.2
+
+A real 1.3.1 report finally contained UART0 RX: 84 bytes in two chunks. The last captured frame began:
+
+    75 66 02 20 00 0C 00 68 ...
+
+This is a SIYI 0x48 mapping response damaged by the Linux TTY IUCLC option: ASCII uppercase bytes were converted to lowercase:
+- 0x55 ('U') -> 0x75 ('u');
+- 0x48 ('H') -> 0x68 ('h').
+
+Restoring only those two bytes makes the recorded CRC exactly match (0xBB1D). The live MK15 mapping contained:
+- CH10 = type 1 / entity 2 = C;
+- CH11 = type 1 / entity 3 = D.
+
+Version 1.3.2 explicitly disables IUCLC on ttyHS0 and also contains a CRC-validated recovery path for already lowercased SIYI frames. This gives us both a source fix and a defensive parser fallback.

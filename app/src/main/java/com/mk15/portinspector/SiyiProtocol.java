@@ -113,18 +113,66 @@ public final class SiyiProtocol {
         public final int seq;
         public final int cmdId;
         public final byte[] data;
+        public final boolean ttyCaseRepaired;
 
-        Frame(int ctrl, int seq, int cmdId, byte[] data) {
+        Frame(int ctrl, int seq, int cmdId, byte[] data, boolean ttyCaseRepaired) {
             this.ctrl = ctrl;
             this.seq = seq;
             this.cmdId = cmdId;
             this.data = data;
+            this.ttyCaseRepaired = ttyCaseRepaired;
         }
     }
 
     public interface FrameListener {
         void onFrame(Frame frame);
         void onBadCrc(byte[] candidate);
+    }
+
+    public static byte[] repairIuclcFrame(byte[] input) {
+        if (input == null || input.length < 10) return null;
+        if ((input[0] & 0xFF) != 0x75 || (input[1] & 0xFF) != 0x66) return null;
+
+        byte[] base = Arrays.copyOf(input, input.length);
+        base[0] = 0x55;
+
+        // SIYI command IDs used here are ASCII-range bytes. Linux IUCLC may map
+        // uppercase command bytes such as 0x48 ('H') to 0x68 ('h').
+        int cmd = base[7] & 0xFF;
+        if (cmd >= 0x61 && cmd <= 0x7A) base[7] = (byte) (cmd - 0x20);
+
+        int dataLen = u16le(base, 3);
+        if (dataLen < 0 || 8 + dataLen + 2 != base.length) return null;
+
+        int[] positions = new int[Math.min(base.length, 32)];
+        int count = 0;
+        for (int i = 2; i < base.length; i++) {
+            if (i == 7) continue;
+            int v = base[i] & 0xFF;
+            if (v >= 0x61 && v <= 0x7A) {
+                if (count >= 14) return null;
+                positions[count++] = i;
+            }
+        }
+
+        int combinations = 1 << count;
+        for (int mask = 0; mask < combinations; mask++) {
+            byte[] candidate = Arrays.copyOf(base, base.length);
+            for (int bit = 0; bit < count; bit++) {
+                if ((mask & (1 << bit)) != 0) {
+                    int p = positions[bit];
+                    candidate[p] = (byte) ((candidate[p] & 0xFF) - 0x20);
+                }
+            }
+
+            if ((candidate[0] & 0xFF) != 0x55 || (candidate[1] & 0xFF) != 0x66) continue;
+            int len = u16le(candidate, 3);
+            if (8 + len + 2 != candidate.length) continue;
+            int expected = u16le(candidate, 8 + len);
+            int actual = crc16(candidate, 0, 8 + len);
+            if (expected == actual) return candidate;
+        }
+        return null;
     }
 
     public static final class Parser {
@@ -148,8 +196,9 @@ public final class SiyiProtocol {
             while (size >= 10) {
                 int start = findHeader();
                 if (start < 0) {
-                    // Keep one possible leading 0x55 for the next chunk.
-                    if ((buffer[size - 1] & 0xFF) == 0x55) {
+                    // Keep one possible leading header byte for the next chunk.
+                    int tail = buffer[size - 1] & 0xFF;
+                    if (tail == 0x55 || tail == 0x75) {
                         buffer[0] = buffer[size - 1];
                         size = 1;
                     } else {
@@ -168,8 +217,19 @@ public final class SiyiProtocol {
                 int frameLen = 8 + dataLen + 2;
                 if (size < frameLen) return;
 
-                int expected = u16le(buffer, 8 + dataLen);
-                int actual = crc16(buffer, 0, 8 + dataLen);
+                byte[] candidate = Arrays.copyOfRange(buffer, 0, frameLen);
+                boolean repaired = false;
+
+                if ((candidate[0] & 0xFF) == 0x75 && (candidate[1] & 0xFF) == 0x66) {
+                    byte[] restored = repairIuclcFrame(candidate);
+                    if (restored != null) {
+                        candidate = restored;
+                        repaired = true;
+                    }
+                }
+
+                int expected = u16le(candidate, 8 + dataLen);
+                int actual = crc16(candidate, 0, 8 + dataLen);
                 if (expected != actual) {
                     if (listener != null) {
                         listener.onBadCrc(Arrays.copyOfRange(buffer, 0, frameLen));
@@ -178,18 +238,20 @@ public final class SiyiProtocol {
                     continue;
                 }
 
-                int ctrl = buffer[2] & 0xFF;
-                int seq = u16le(buffer, 5);
-                int cmd = buffer[7] & 0xFF;
-                byte[] data = Arrays.copyOfRange(buffer, 8, 8 + dataLen);
-                if (listener != null) listener.onFrame(new Frame(ctrl, seq, cmd, data));
+                int ctrl = candidate[2] & 0xFF;
+                int seq = u16le(candidate, 5);
+                int cmd = candidate[7] & 0xFF;
+                byte[] data = Arrays.copyOfRange(candidate, 8, 8 + dataLen);
+                if (listener != null) listener.onFrame(new Frame(ctrl, seq, cmd, data, repaired));
                 discard(frameLen);
             }
         }
 
         private int findHeader() {
             for (int i = 0; i < size - 1; i++) {
-                if ((buffer[i] & 0xFF) == 0x55 && (buffer[i + 1] & 0xFF) == 0x66) return i;
+                int first = buffer[i] & 0xFF;
+                int second = buffer[i + 1] & 0xFF;
+                if ((first == 0x55 || first == 0x75) && second == 0x66) return i;
             }
             return -1;
         }

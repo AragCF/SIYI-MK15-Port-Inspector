@@ -63,6 +63,24 @@ public final class ProtocolSelfTest {
         if (ch5Type != 5 || ch5Entity != 0) throw new AssertionError("Official CH5 mapping is not SA: " + ch5Type + "/" + ch5Entity);
         System.out.println("OK: official 0x48 response parsed; CH5 -> " + SiyiProtocol.physicalChannelName(ch5Type, ch5Entity));
 
+        // Real MK15 1.3.1 capture from /dev/ttyHS0. The TTY had IUCLC enabled:
+        // 0x55 ('U') became 0x75 ('u'), 0x48 ('H') became 0x68 ('h').
+        // After restoring those bytes the recorded CRC 0xBB1D is exact.
+        byte[] iuclcSample = hex("75 66 02 20 00 0C 00 68 00 00 00 01 00 02 00 03 05 00 05 01 05 02 01 00 01 01 01 02 01 03 00 04 00 05 02 01 00 04 01 01 1D BB");
+        parser.append(iuclcSample, iuclcSample.length);
+        if (frames.size() != 2) throw new AssertionError("Expected repaired real MK15 mapping frame");
+        SiyiProtocol.Frame real = frames.get(1);
+        if (!real.ttyCaseRepaired || real.cmdId != 0x48) {
+            throw new AssertionError("Real MK15 IUCLC frame was not repaired");
+        }
+        if ((real.data[18] & 0xFF) != 1 || (real.data[19] & 0xFF) != 2) {
+            throw new AssertionError("Real MK15 CH10 must map to C");
+        }
+        if ((real.data[20] & 0xFF) != 1 || (real.data[21] & 0xFF) != 3) {
+            throw new AssertionError("Real MK15 CH11 must map to D");
+        }
+        System.out.println("OK: real MK15 IUCLC-damaged 0x48 repaired; CH10=C, CH11=D");
+
         // Synthetic, CRC-correct 0x42 response with 16 channels. Live MK15 values are validated on hardware later.
         int[] values = {1500, 1500, 1500, 1500, 1050, 1500, 1950, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500};
         byte[] chData = new byte[32];
@@ -72,8 +90,8 @@ public final class ProtocolSelfTest {
         }
         byte[] chFrame = response(0, 153, 0x42, chData);
         parser.append(chFrame, chFrame.length);
-        if (frames.size() != 2) throw new AssertionError("Expected channel frame");
-        SiyiProtocol.Frame c = frames.get(1);
+        if (frames.size() != 3) throw new AssertionError("Expected channel frame");
+        SiyiProtocol.Frame c = frames.get(2);
         if (SiyiProtocol.u16le(c.data, 8) != 1050) throw new AssertionError("CH5 decode failed");
         System.out.println("OK: 0x42 parser decoded 16 channels; CH5=1050");
 

@@ -381,11 +381,15 @@ public final class ResearchTransports {
             return "skipped: unsupported path";
         }
 
-        String args = safePath + " " + baud + " raw -echo -ixon -ixoff -icrnl -inlcr -opost";
+        String strongArgs = safePath + " " + baud
+                + " raw -echo -ixon -ixoff -icrnl -inlcr -opost -iuclc cs8 -parenb -cstopb";
+        String fallbackArgs = safePath + " " + baud
+                + " raw -echo -ixon -ixoff -icrnl -inlcr -opost";
         String[] commands = {
-                "stty -F " + args,
-                "toybox stty -F " + args,
-                "/system/bin/toybox stty -F " + args
+                "stty -F " + strongArgs,
+                "toybox stty -F " + strongArgs,
+                "/system/bin/toybox stty -F " + strongArgs,
+                "stty -F " + fallbackArgs
         };
 
         StringBuilder result = new StringBuilder();
@@ -394,7 +398,12 @@ public final class ResearchTransports {
             if (result.length() > 0) result.append(" | ");
             result.append("[").append(command).append("] rc=").append(shell.code);
             if (!shell.output.isEmpty()) result.append(" out=").append(shell.output);
-            if (shell.code == 0) return result.toString();
+            if (shell.code == 0) {
+                ShellResult effective = runShell("stty -F " + safePath + " -a");
+                result.append(" | effective rc=").append(effective.code);
+                if (!effective.output.isEmpty()) result.append(" ").append(effective.output);
+                return result.toString();
+            }
         }
         return result.toString();
     }
