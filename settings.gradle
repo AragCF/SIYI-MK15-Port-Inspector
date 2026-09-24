@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "MK15PortInspector"
 include ':app'
+
+include ':mk15-sdk'
