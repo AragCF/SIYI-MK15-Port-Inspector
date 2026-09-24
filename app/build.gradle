@@ -5,7 +5,6 @@ plugins {
 android {
     namespace 'com.mk15.portinspector'
     compileSdk 34
-    ndkVersion '28.2.13676358'
 
     defaultConfig {
         applicationId 'com.mk15.portinspector'
@@ -13,15 +12,11 @@ android {
         targetSdk 28
         versionCode 40
         versionName '1.4.0'
-
-        ndk {
-            abiFilters 'arm64-v8a'
-        }
     }
 
-    externalNativeBuild {
-        ndkBuild {
-            path file('src/main/jni/Android.mk')
+    sourceSets {
+        main {
+            jniLibs.srcDirs = [rootProject.file('.native-jniLibs')]
         }
     }
 

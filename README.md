@@ -233,3 +233,13 @@ BUILD_WINDOWS.bat installs Android NDK 28.2.13676358 automatically once when nec
 The workstation already has side-by-side NDK versions `27.0.12077973` and `28.2.13676358`. The project now pins `28.2.13676358`; no additional NDK download is needed locally.
 
 If the pinned NDK is absent on another machine, the build script invokes `sdkmanager` with an explicit `--sdk_root`, avoiding the command-line-tools layout problem seen in the failed local run.
+
+
+## Windows path fix for native build
+
+The project lives under a Windows path containing spaces and `!`:
+`C:\54\Projects\!0724 - Coating Robot\...`.
+
+NDK `ndk-build`/GNU Make reported the existing `Android.mk` as an unknown file when that absolute path was passed as `APP_BUILD_SCRIPT`. To avoid this path parser entirely, native UART 1.4.0 is now compiled directly by the NDK LLVM/Clang driver.
+
+The generated ARM64 `libmk15serial.so` is written to the ignored `.native-jniLibs/arm64-v8a/` directory and packaged by Gradle as a prebuilt JNI library. The build script verifies the ELF architecture with `llvm-readelf` when available.

@@ -50,6 +50,11 @@ jobs:
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" "ndk;28.2.13676358"
 
+      - name: Build native UART
+        shell: powershell
+        run: |
+          .\tools\build_native_windows.ps1 -SdkRoot $env:ANDROID_SDK_ROOT -NdkVersion "28.2.13676358"
+
       - name: Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:

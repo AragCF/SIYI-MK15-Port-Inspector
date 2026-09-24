@@ -7,3 +7,4 @@ local.properties
 out/*.apk
 build_windows.log
 *.iml
+.native-jniLibs/

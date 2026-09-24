@@ -87,8 +87,8 @@ if (-not (Test-Path $AndroidJar) -or -not (Test-Path $Aapt2)) {
 }
 
 $NdkVersion = '28.2.13676358'
-$NdkBuild = Join-Path $Sdk ('ndk\' + $NdkVersion + '\ndk-build.cmd')
-if (-not (Test-Path $NdkBuild)) {
+$NdkRoot = Join-Path $Sdk ('ndk\' + $NdkVersion)
+if (-not (Test-Path $NdkRoot)) {
     Write-Host ''
     Write-Host ('Android NDK ' + $NdkVersion + ' is missing. Installing it once...') -ForegroundColor Yellow
     $SdkManager = $null
@@ -111,10 +111,17 @@ if (-not (Test-Path $NdkBuild)) {
         Fail ('sdkmanager failed to install ndk;' + $NdkVersion + ' rc=' + $LASTEXITCODE)
     }
 }
-if (-not (Test-Path $NdkBuild)) {
-    Fail ('NDK installation finished but ndk-build.cmd was not found: ' + $NdkBuild)
+if (-not (Test-Path $NdkRoot)) {
+    Fail ('NDK installation finished but directory was not found: ' + $NdkRoot)
 }
-Write-Host ('ANDROID_NDK=' + (Split-Path -Parent $NdkBuild))
+Write-Host ('ANDROID_NDK=' + $NdkRoot)
+
+Write-Host ''
+Write-Host 'Building native UART library with clang (without ndk-build)...'
+& (Join-Path $PSScriptRoot 'build_native_windows.ps1') -SdkRoot $Sdk -NdkVersion $NdkVersion
+if ($LASTEXITCODE -ne 0) {
+    Fail ('Native UART build returned exit code ' + $LASTEXITCODE)
+}
 
 $HostBuild = Join-Path $Root '.host-test-build'
 if (Test-Path $HostBuild) {
