@@ -8,3 +8,4 @@ out/*.apk
 build_windows.log
 *.iml
 .native-jniLibs/
+.native-sdk-jniLibs/
