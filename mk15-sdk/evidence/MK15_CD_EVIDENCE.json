@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "device": "SIYI MK15",
+  "sdk_version": "1.0.0",
+  "transport": {
+    "path": "/dev/ttyHS0",
+    "baud": 115200,
+    "format": "8N1",
+    "binary_clean": true
+  },
+  "verified_mapping": {"C": 10, "D": 11},
+  "verified_values": {"released": 1050, "pressed": 1950},
+  "recommended_thresholds": {"released_max": 1300, "pressed_min": 1700},
+  "evidence_totals": {
+    "channel_frames": 391,
+    "C_presses": 14,
+    "D_presses": 14,
+    "labelled_actions": 28,
+    "mismatches": 0
+  },
+  "reports": [
+    {
+      "file": "MK15_Report_20260924_134701_v1_4_0.zip",
+      "sha256": "F33D11B3880FC6358E9D09F7B3672B0B3BD4F3C80D3FA8BDB073F140D2DDB6D2",
+      "channel_frames": 237,
+      "C_presses": 8,
+      "D_presses": 8
+    },
+    {
+      "file": "MK15_Report_20260924_210500_v1_4_0.zip",
+      "sha256": "4189C17C22E496F6B55229B86AFED804A948B01A3E0CF26C19BAB9333C6D54E9",
+      "channel_frames": 154,
+      "C_presses": 6,
+      "D_presses": 6
+    }
+  ]
+}
