@@ -1,0 +1,10 @@
+﻿run_id=build_20260924_032720
+run_type=build
+result_code=0
+finished_at=2026-09-24T03:28:31+03:00
+os=Microsoft Windows NT 10.0.19045.0
+git_head_before_publish=d0a9ecf40088c004e8058e9420d317f008b5d153
+git_branch=main
+git_remote=https://github.com/AragCF/SIYI-MK15-Port-Inspector.git
+run_path=runs/build_20260924_032720
+apk_count=1
