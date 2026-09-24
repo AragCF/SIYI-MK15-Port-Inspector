@@ -1,0 +1,45 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260924045249
+Username: DJ-ANDREY-ISAK\Andrey
+RunAs User: DJ-ANDREY-ISAK\Andrey
+Configuration Name: 
+Machine: DJ-ANDREY-ISAK (Microsoft Windows NT 10.0.19045.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\tools\run_build.ps1
+Process ID: 9616
+PSVersion: 5.1.19041.4648
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.19041.4648
+BuildVersion: 10.0.19041.4648
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Run directory: C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\runs\build_20260924_045248
+Console output, build artifacts and a short environment snapshot are preserved even on failure.
+
+=== MK15 Port Inspector: Windows build ===
+Project: C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector
+JAVA_HOME=C:\Program Files\OpenLogic\jdk-21.0.4.7-hotspot
+openjdk version "21.0.4" 2024-07-16
+OpenJDK Runtime Environment OpenLogic-OpenJDK (build 21.0.4+7-adhoc.Administrator.jdk21u)
+OpenJDK 64-Bit Server VM OpenLogic-OpenJDK (build 21.0.4+7-adhoc.Administrator.jdk21u, mixed mode, sharing)
+ANDROID_SDK_ROOT=C:\54\Dist\Progr\Android_Tools
+
+Android NDK 26.3.11579264 is missing. Installing it once...
+Error: Could not determine SDK root.
+Error: Either specify it explicitly with --sdk_root= or move this package into its expected location: <sdk>\cmdline-tools\latest\
+
+ERROR: sdkmanager failed to install ndk;26.3.11579264 rc=1
+PS>TerminatingError(): "sdkmanager failed to install ndk;26.3.11579264 rc=1"
+>> TerminatingError(): "sdkmanager failed to install ndk;26.3.11579264 rc=1"
+
+BUILD FAILED: sdkmanager failed to install ndk;26.3.11579264 rc=1
+at Fail, C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\tools\build_windows.ps1: line 21
+at <ScriptBlock>, C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\tools\build_windows.ps1: line 111
+at <ScriptBlock>, C:\54\Projects\!0724 - Coating Robot\SIYI-MK15-Port-Inspector\tools\run_build.ps1: line 41
+**********************
+Windows PowerShell transcript end
+End time: 20260924045253
+**********************
