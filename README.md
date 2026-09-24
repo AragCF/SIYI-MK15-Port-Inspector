@@ -1,6 +1,6 @@
 # SIYI MK15 Port Inspector
 
-Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
+Diagnostic Android application for SIYI MK15. The completed C/D research identified the working Datalink UART and verified the exact channels and live values of the physical C and D buttons. The application remains a reusable inspector for further MK15 interface research.
 
 Current version: 1.4.0.
 
@@ -243,3 +243,19 @@ The project lives under a Windows path containing spaces and `!`:
 NDK `ndk-build`/GNU Make reported the existing `Android.mk` as an unknown file when that absolute path was passed as `APP_BUILD_SCRIPT`. To avoid this path parser entirely, native UART 1.4.0 is now compiled directly by the NDK LLVM/Clang driver.
 
 The generated ARM64 `libmk15serial.so` is written to the ignored `.native-jniLibs/arm64-v8a/` directory and packaged by Gradle as a prebuilt JNI library. The build script verifies the ELF architecture with `llvm-readelf` when available.
+
+
+## C/D research completed
+
+Hardware validation with Port Inspector 1.4.0 completed the current research goal.
+
+Verified on the real MK15:
+- SIYI Datalink UART: `/dev/ttyHS0`, 115200;
+- native termios is binary clean;
+- mapping: `CH10=C`, `CH11=D`;
+- released value: `1050`;
+- pressed value: `1950`;
+- live channel stream: `CMD 0x42`, 4 Hz;
+- two independent sessions produced 391 live channel frames and 28 labelled C/D actions with no action/channel mismatches.
+
+See `docs/MK15_CD_FINAL_SPEC.md`.
