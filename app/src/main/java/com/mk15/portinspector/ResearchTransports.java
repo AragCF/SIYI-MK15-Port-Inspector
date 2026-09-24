@@ -130,7 +130,7 @@ public final class ResearchTransports {
     public synchronized void connectRaw(final String source, final String path) throws Exception {
         stop(source);
         if (UART0.equals(source)) {
-            connectUart0Bridge(path);
+            connectNativeUart0(path);
             return;
         }
 
@@ -189,117 +189,52 @@ public final class ResearchTransports {
         session.thread.start();
     }
 
-    private void connectUart0Bridge(final String path) throws Exception {
+    private void connectNativeUart0(final String path) throws Exception {
         final File file = new File(path);
         if (!file.exists()) throw new Exception(path + " does not exist");
         if (!file.canRead() || !file.canWrite()) {
             throw new SecurityException(path + " must be readable and writable");
         }
         if (!"/dev/ttyHS0".equals(path)) {
-            throw new IllegalArgumentException("UART0 bridge only supports /dev/ttyHS0");
+            throw new IllegalArgumentException("Native UART0 only supports /dev/ttyHS0");
+        }
+        if (!NativeSerial.isAvailable()) {
+            throw new Exception("Native serial library unavailable: " + NativeSerial.loadError());
         }
 
-        final String flags = "115200 raw -echo -ixon -ixoff -ixany -icrnl -inlcr -opost "
-                + "-iuclc -istrip -inpck -ignpar -parmrk -iutf8 cs8 -parenb -cstopb";
-
-        final String script =
-                "exec 3<>/dev/ttyHS0 || exit 41\n"
-                + "(stty " + flags + " <&3"
-                + " || toybox stty " + flags + " <&3"
-                + " || /system/bin/toybox stty " + flags + " <&3) || exit 42\n"
-                + "echo __MK15_STTY_BEGIN__ >&2\n"
-                + "(stty -a <&3 || toybox stty -a <&3 || /system/bin/toybox stty -a <&3) >&2\n"
-                + "echo __MK15_STTY_END__ >&2\n"
-                + "cat >&3 &\n"
-                + "exec cat <&3\n";
-
-        final Process process = new ProcessBuilder("sh", "-c", script)
-                .redirectErrorStream(false)
-                .start();
-
-        final InputStream serialInput = process.getInputStream();
-        final OutputStream serialOutput = process.getOutputStream();
-        final InputStream diagnostics = process.getErrorStream();
-
+        final NativeSerial.Port port = NativeSerial.open(path, 115200);
         final Session session = new Session(UART0);
         session.running = true;
-        session.status = "connected /dev/ttyHS0 via same-FD shell bridge 115200 raw";
-        session.config = "bridge starting";
+        session.status = "connected /dev/ttyHS0 native termios 115200 8N1";
+        session.config = port.describe();
+        session.closer = port;
         session.sender = data -> {
-            serialOutput.write(data);
-            serialOutput.flush();
+            port.write(data);
             session.txBytes.addAndGet(data.length);
-        };
-        session.closer = new Closeable() {
-            @Override
-            public void close() {
-                session.running = false;
-                try { serialOutput.close(); } catch (Throwable ignored) {}
-                try { serialInput.close(); } catch (Throwable ignored) {}
-                try { diagnostics.close(); } catch (Throwable ignored) {}
-                try { process.destroy(); } catch (Throwable ignored) {}
-            }
         };
         sessions.put(UART0, session);
 
-        final StringBuilder diag = new StringBuilder();
-        Thread diagThread = new Thread(() -> {
-            byte[] buf = new byte[512];
-            try {
-                int n;
-                while (session.running && (n = diagnostics.read(buf)) >= 0) {
-                    if (n == 0) continue;
-                    String part = new String(buf, 0, n);
-                    synchronized (diag) {
-                        if (diag.length() < 8192) {
-                            int keep = Math.min(part.length(), 8192 - diag.length());
-                            diag.append(part, 0, keep);
-                            session.config = diag.toString().replace('\n', ' ').trim();
-                        }
-                    }
-                }
-            } catch (Throwable t) {
-                if (session.running) info(UART0, "bridge diagnostics ended: " + t.getClass().getSimpleName());
-            }
-        }, "mk15-uart0-bridge-diagnostics");
-        diagThread.start();
+        info(UART0, session.status + "; " + session.config);
 
         session.thread = new Thread(() -> {
             byte[] buffer = new byte[2048];
-            info(UART0, session.status);
             try {
                 while (session.running) {
-                    int n = serialInput.read(buffer);
-                    if (n < 0) break;
+                    int n = port.read(buffer, 500);
                     if (n == 0) continue;
                     byte[] copy = Arrays.copyOf(buffer, n);
                     recordRx(session, copy, n);
                     if (listener != null) listener.onBytes(UART0, copy, n);
                 }
             } catch (Throwable t) {
-                if (session.running) error(UART0, "UART0 same-FD bridge read failed", t);
+                if (session.running) error(UART0, "Native UART0 read failed", t);
             } finally {
                 session.running = false;
-                try { serialOutput.close(); } catch (Throwable ignored) {}
-                try { serialInput.close(); } catch (Throwable ignored) {}
-                try { diagnostics.close(); } catch (Throwable ignored) {}
-                try { process.destroy(); } catch (Throwable ignored) {}
                 session.status = "disconnected";
+                try { port.close(); } catch (Throwable ignored) {}
             }
-        }, "mk15-uart0-same-fd-reader");
+        }, "mk15-uart0-native-reader");
         session.thread.start();
-
-        Thread.sleep(180);
-        try {
-            int code = process.exitValue();
-            sessions.remove(UART0);
-            String message;
-            synchronized (diag) { message = diag.toString().trim(); }
-            throw new Exception("UART0 bridge exited early rc=" + code
-                    + (message.isEmpty() ? "" : " diagnostics=" + message));
-        } catch (IllegalThreadStateException stillRunning) {
-            // Expected: the bridge remains alive and owns fd3 for the whole session.
-        }
     }
 
     public synchronized void connectBluetoothAsync() throws Exception {

@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $Root = Split-Path -Parent $PSScriptRoot
 $OutDir = Join-Path $Root 'out'
 $ApkSource = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
-$ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.3.5-debug.apk'
+$ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.4.0-debug.apk'
 $ToolsDir = Join-Path $Root '.tools'
 $GradleVersion = '8.7'
 $GradleZip = Join-Path $ToolsDir ("gradle-" + $GradleVersion + "-bin.zip")
@@ -85,6 +85,36 @@ if (-not (Test-Path $AndroidJar) -or -not (Test-Path $Aapt2)) {
     Write-Host '  sdkmanager.bat "platforms;android-34" "build-tools;34.0.0" "platform-tools"'
     Fail 'Required Android SDK components are missing.'
 }
+
+$NdkVersion = '26.3.11579264'
+$NdkBuild = Join-Path $Sdk ('ndk\' + $NdkVersion + '\ndk-build.cmd')
+if (-not (Test-Path $NdkBuild)) {
+    Write-Host ''
+    Write-Host ('Android NDK ' + $NdkVersion + ' is missing. Installing it once...') -ForegroundColor Yellow
+    $SdkManager = $null
+    $SdkManagerCmd = Get-Command sdkmanager.bat -ErrorAction SilentlyContinue
+    if ($SdkManagerCmd) {
+        $SdkManager = $SdkManagerCmd.Source
+    }
+    if (-not $SdkManager) {
+        $CmdlineRoot = Join-Path $Sdk 'cmdline-tools'
+        if (Test-Path $CmdlineRoot) {
+            $SdkManagerFile = Get-ChildItem -Path $CmdlineRoot -Filter 'sdkmanager.bat' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($SdkManagerFile) { $SdkManager = $SdkManagerFile.FullName }
+        }
+    }
+    if (-not $SdkManager) {
+        Fail ('sdkmanager.bat was not found. Install Android command-line tools, then install ndk;' + $NdkVersion)
+    }
+    & $SdkManager ('ndk;' + $NdkVersion)
+    if ($LASTEXITCODE -ne 0) {
+        Fail ('sdkmanager failed to install ndk;' + $NdkVersion + ' rc=' + $LASTEXITCODE)
+    }
+}
+if (-not (Test-Path $NdkBuild)) {
+    Fail ('NDK installation finished but ndk-build.cmd was not found: ' + $NdkBuild)
+}
+Write-Host ('ANDROID_NDK=' + (Split-Path -Parent $NdkBuild))
 
 $HostBuild = Join-Path $Root '.host-test-build'
 if (Test-Path $HostBuild) {

@@ -2,7 +2,7 @@
 
 Diagnostic Android application for SIYI MK15. The first practical goal is to determine which interface exposes the upper-left three-position SA switch, find its actual communication channel, and display the live value.
 
-Current version: 1.3.5.
+Current version: 1.4.0.
 
 ## Repository workflow
 
@@ -43,7 +43,7 @@ The script:
 
 The build output is also copied to:
 
-    out\MK15PortInspector-1.3.5-debug.apk
+    out\MK15PortInspector-1.4.0-debug.apk
 
 If automatic upload fails because of network, Git authentication, a remote update, or unrelated local changes, the run directory and local diagnostic commit are preserved. Retry with:
 
@@ -205,3 +205,24 @@ Version 1.3.5 changes the ownership model. A long-lived shell process:
 This avoids reopening the TTY between configuration and data transfer.
 
 The active C/D sequence was also corrected so AUTO reconnect no longer sends an early 0x42 before the PRE-RC mapping. The central scenario alone controls: mapping -> wait -> three identical 0x42 requests.
+
+
+## Native UART 1.4.0
+
+The 1.3.5 hardware report exposed two independent shell-bridge problems:
+- every UART0 write failed with `EPIPE (Broken pipe)`, so mapping/0x42 never reached ttyHS0 through that bridge;
+- the descriptor shown by shell `stty -a` still contained vendor input transformations.
+
+Version 1.4.0 removes shell/stty from the official UART0 path. A small ARM64 JNI library opens `/dev/ttyHS0` directly and configures that exact descriptor with Android/bionic `tcsetattr`:
+- input flags = 0;
+- output flags = 0;
+- local flags = 0;
+- 115200 baud;
+- 8N1;
+- CLOCAL + CREAD;
+- no hardware flow control;
+- VMIN=1, VTIME=0.
+
+The same native fd is then used for poll/read/write. Reports record the actual termios bitmasks and `binaryClean=true/false`.
+
+BUILD_WINDOWS.bat installs Android NDK 26.3.11579264 automatically once when necessary.

@@ -200,3 +200,17 @@ GitHub Actions run `35917083657` — **success**.
 - Android Gradle build;
 - создание `MK15PortInspector-1.3.5-debug.apk`;
 - публикация артефакта.
+
+
+## Аппаратный отчёт 1.3.5 → Native UART 1.4.0
+
+1.3.5 показала:
+- `transport.uart0.rxBytes=0`;
+- `transport.uart0.txBytes=0`;
+- каждая UART0 запись завершалась `EPIPE (Broken pipe)`;
+- shell bridge не являлся рабочим двунаправленным транспортом;
+- termios оставался небинарным.
+
+Shell/stty ветка для официального UART0 прекращена.
+
+1.4.0 использует JNI и bionic `tcsetattr` непосредственно на том же fd, через который выполняются `poll/read/write`. ABI: `arm64-v8a`. NDK: `26.3.11579264`.
