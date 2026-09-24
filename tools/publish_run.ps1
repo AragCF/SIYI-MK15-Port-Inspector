@@ -40,6 +40,11 @@ $ApkCandidates = @(
     (Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk')
 )
 
+$AarCandidates = @(
+    (Join-Path $Root 'out\MK15-CD-SDK-1.0.0.aar'),
+    (Join-Path $Root 'mk15-sdk\build\outputs\aar\mk15-sdk-release.aar')
+)
+
 $CopiedApk = @()
 foreach ($Apk in $ApkCandidates) {
     if (Test-Path $Apk) {
@@ -55,14 +60,29 @@ foreach ($Apk in $ApkCandidates) {
     }
 }
 
+$CopiedAar = @()
+foreach ($Aar in $AarCandidates) {
+    if (Test-Path $Aar) {
+        $Name = Split-Path -Leaf $Aar
+        if ($Name -eq 'mk15-sdk-release.aar') {
+            $Name = 'MK15-CD-SDK-1.0.0.aar'
+        }
+        $Destination = Join-Path $ArtifactDir $Name
+        Copy-Item -Force $Aar $Destination
+        if ($CopiedAar -notcontains $Destination) {
+            $CopiedAar += $Destination
+        }
+    }
+}
+
 $HashLines = @()
-foreach ($Apk in $CopiedApk) {
+foreach ($Artifact in @($CopiedApk + $CopiedAar)) {
     try {
-        $Hash = Get-FileHash -Algorithm SHA256 $Apk
-        $HashLines += ($Hash.Hash + '  ' + (Split-Path -Leaf $Apk))
+        $Hash = Get-FileHash -Algorithm SHA256 $Artifact
+        $HashLines += ($Hash.Hash + '  ' + (Split-Path -Leaf $Artifact))
     }
     catch {
-        $HashLines += ('HASH_ERROR  ' + (Split-Path -Leaf $Apk) + '  ' + $_.Exception.Message)
+        $HashLines += ('HASH_ERROR  ' + (Split-Path -Leaf $Artifact) + '  ' + $_.Exception.Message)
     }
 }
 
@@ -85,7 +105,8 @@ $Summary = @(
     ('git_branch=' + $GitBranch),
     ('git_remote=' + $GitRemote),
     ('run_path=' + $RunRel),
-    ('apk_count=' + $CopiedApk.Count)
+    ('apk_count=' + $CopiedApk.Count),
+    ('aar_count=' + $CopiedAar.Count)
 )
 
 $Summary | Out-File -FilePath $SummaryPath -Encoding UTF8
