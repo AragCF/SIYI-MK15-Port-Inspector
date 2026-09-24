@@ -283,3 +283,9 @@ SDK включает native UART0, runtime mapping `0x48`, поток канал
 - `mk15-sdk/evidence/MK15_CD_EVIDENCE.json`.
 
 GitHub Actions run `36052471874` подтвердил сборку APK и Release AAR.
+
+## Полный итоговый отчёт
+
+Полная история исследования, методика, промежуточные тупики, аппаратные доказательства, финальная спецификация и передача результата в SDK собраны в:
+
+`docs/MK15_CD_RESEARCH_FULL_REPORT.md`
