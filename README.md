@@ -259,3 +259,27 @@ Verified on the real MK15:
 - two independent sessions produced 391 live channel frames and 28 labelled C/D actions with no action/channel mismatches.
 
 See `docs/MK15_CD_FINAL_SPEC.md`.
+
+## Developer SDK
+
+Завершённое исследование C/D оформлено также как подключаемый Android-модуль:
+
+```text
+mk15-sdk/
+```
+
+Готовый артефакт сборки:
+
+```text
+out/MK15-CD-SDK-1.0.0.aar
+```
+
+SDK включает native UART0, runtime mapping `0x48`, поток каналов `0x42` 4 Гц и события C/D.
+
+Документация:
+- `mk15-sdk/README.md`;
+- `docs/MK15_CD_SDK_1.0.0.md`;
+- `docs/MK15_CD_FINAL_SPEC.md`;
+- `mk15-sdk/evidence/MK15_CD_EVIDENCE.json`.
+
+GitHub Actions run `36052471874` подтвердил сборку APK и Release AAR.
