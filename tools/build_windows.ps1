@@ -9,6 +9,8 @@ $Root = Split-Path -Parent $PSScriptRoot
 $OutDir = Join-Path $Root 'out'
 $ApkSource = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
 $ApkTarget = Join-Path $OutDir 'MK15PortInspector-1.4.0-debug.apk'
+$AarSource = Join-Path $Root 'mk15-sdk\build\outputs\aar\mk15-sdk-release.aar'
+$AarTarget = Join-Path $OutDir 'MK15-CD-SDK-1.0.0.aar'
 $ToolsDir = Join-Path $Root '.tools'
 $GradleVersion = '8.7'
 $GradleZip = Join-Path $ToolsDir ("gradle-" + $GradleVersion + "-bin.zip")
@@ -135,14 +137,17 @@ $ProtocolSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\Siyi
 $DiffSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ProbeDiffEngine.java'
 $ReportSource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ReportTools.java'
 $ActivitySource = Join-Path $Root 'app\src\main\java\com\mk15\portinspector\ChannelActivityTracker.java'
+$SdkProtocolSource = Join-Path $Root 'mk15-sdk\src\main\java\com\mk15\sdk\Mk15Protocol.java'
+$SdkEvidenceSource = Join-Path $Root 'mk15-sdk\src\main\java\com\mk15\sdk\Mk15Evidence.java'
 $ProtocolTest = Join-Path $Root 'host-tests\ProtocolSelfTest.java'
 $DiffTest = Join-Path $Root 'host-tests\ProbeDiffSelfTest.java'
 $ReportTest = Join-Path $Root 'host-tests\ReportToolsSelfTest.java'
 $ActivityTest = Join-Path $Root 'host-tests\ChannelActivityTrackerSelfTest.java'
+$SdkTest = Join-Path $Root 'host-tests\Mk15SdkSelfTest.java'
 
 Write-Host ''
 Write-Host 'Running SIYI protocol self-test...'
-& $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $DiffSource $ReportSource $ActivitySource $ProtocolTest $DiffTest $ReportTest $ActivityTest
+& $Javac -encoding UTF-8 -d $HostBuild $ProtocolSource $DiffSource $ReportSource $ActivitySource $SdkProtocolSource $SdkEvidenceSource $ProtocolTest $DiffTest $ReportTest $ActivityTest $SdkTest
 if ($LASTEXITCODE -ne 0) {
     Fail ('javac protocol test compile returned exit code ' + $LASTEXITCODE)
 }
@@ -162,6 +167,10 @@ if ($LASTEXITCODE -ne 0) {
 & $Java -cp $HostBuild ChannelActivityTrackerSelfTest
 if ($LASTEXITCODE -ne 0) {
     Fail ('ChannelActivityTrackerSelfTest returned exit code ' + $LASTEXITCODE)
+}
+& $Java -cp $HostBuild Mk15SdkSelfTest
+if ($LASTEXITCODE -ne 0) {
+    Fail ('Mk15SdkSelfTest returned exit code ' + $LASTEXITCODE)
 }
 
 $GradleCmd = Get-Command gradle.bat -ErrorAction SilentlyContinue
@@ -195,7 +204,7 @@ Push-Location $Root
 try {
     Write-Host ''
     Write-Host 'Running Android debug build...'
-    & $Gradle ':app:assembleDebug' '--no-daemon' '--stacktrace'
+    & $Gradle ':app:assembleDebug' ':mk15-sdk:assembleRelease' '--no-daemon' '--stacktrace'
     if ($LASTEXITCODE -ne 0) {
         Fail ('Gradle returned exit code ' + $LASTEXITCODE)
     }
@@ -207,11 +216,18 @@ finally {
 if (-not (Test-Path $ApkSource)) {
     Fail ('Gradle reported success but APK was not found: ' + $ApkSource)
 }
+if (-not (Test-Path $AarSource)) {
+    Fail ('Gradle reported success but SDK AAR was not found: ' + $AarSource)
+}
 
 Copy-Item -Force $ApkSource $ApkTarget
-$Hash = (Get-FileHash -Algorithm SHA256 $ApkTarget).Hash
+Copy-Item -Force $AarSource $AarTarget
+$ApkHash = (Get-FileHash -Algorithm SHA256 $ApkTarget).Hash
+$AarHash = (Get-FileHash -Algorithm SHA256 $AarTarget).Hash
 
 Write-Host ''
 Write-Host 'BUILD SUCCESSFUL.' -ForegroundColor Green
 Write-Host ('APK: ' + $ApkTarget)
-Write-Host ('SHA256: ' + $Hash)
+Write-Host ('APK SHA256: ' + $ApkHash)
+Write-Host ('SDK AAR: ' + $AarTarget)
+Write-Host ('SDK SHA256: ' + $AarHash)
