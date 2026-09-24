@@ -213,7 +213,7 @@ GitHub Actions run `35917083657` — **success**.
 
 Shell/stty ветка для официального UART0 прекращена.
 
-1.4.0 использует JNI и bionic `tcsetattr` непосредственно на том же fd, через который выполняются `poll/read/write`. ABI: `arm64-v8a`. NDK: `26.3.11579264`.
+1.4.0 использует JNI и bionic `tcsetattr` непосредственно на том же fd, через который выполняются `poll/read/write`. ABI: `arm64-v8a`. NDK: `28.2.13676358`.
 
 
 ## Локальная сборка 1.4.0: устранение зависимости от ndk-build
@@ -227,3 +227,17 @@ Shell/stty ветка для официального UART0 прекращена
 - `mk15serial.c` компилируется напрямую NDK Clang для `aarch64-linux-android23`;
 - результат проверяется как AArch64 ELF;
 - Gradle только упаковывает готовый `libmk15serial.so`.
+
+
+## CI прямой native build 1.4.0
+
+GitHub Actions run `35946294849` — **success**.
+
+Проверены:
+- Windows PowerShell 5.1;
+- NDK 28.2;
+- прямая компиляция `mk15serial.c` через NDK Clang;
+- архитектура AArch64;
+- host-tests;
+- Android Gradle build;
+- публикация APK.
