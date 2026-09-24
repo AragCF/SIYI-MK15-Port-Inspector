@@ -86,7 +86,7 @@ if (-not (Test-Path $AndroidJar) -or -not (Test-Path $Aapt2)) {
     Fail 'Required Android SDK components are missing.'
 }
 
-$NdkVersion = '26.3.11579264'
+$NdkVersion = '28.2.13676358'
 $NdkBuild = Join-Path $Sdk ('ndk\' + $NdkVersion + '\ndk-build.cmd')
 if (-not (Test-Path $NdkBuild)) {
     Write-Host ''
@@ -106,7 +106,7 @@ if (-not (Test-Path $NdkBuild)) {
     if (-not $SdkManager) {
         Fail ('sdkmanager.bat was not found. Install Android command-line tools, then install ndk;' + $NdkVersion)
     }
-    & $SdkManager ('ndk;' + $NdkVersion)
+    & $SdkManager ('--sdk_root=' + $Sdk) ('ndk;' + $NdkVersion)
     if ($LASTEXITCODE -ne 0) {
         Fail ('sdkmanager failed to install ndk;' + $NdkVersion + ' rc=' + $LASTEXITCODE)
     }

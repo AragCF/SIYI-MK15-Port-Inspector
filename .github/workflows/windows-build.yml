@@ -48,7 +48,7 @@ jobs:
       - name: Install Android 34
         shell: pwsh
         run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" "ndk;26.3.11579264"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" "ndk;28.2.13676358"
 
       - name: Gradle 8.7
         uses: gradle/actions/setup-gradle@v4

@@ -225,4 +225,11 @@ Version 1.4.0 removes shell/stty from the official UART0 path. A small ARM64 JNI
 
 The same native fd is then used for poll/read/write. Reports record the actual termios bitmasks and `binaryClean=true/false`.
 
-BUILD_WINDOWS.bat installs Android NDK 26.3.11579264 automatically once when necessary.
+BUILD_WINDOWS.bat installs Android NDK 28.2.13676358 automatically once when necessary.
+
+
+### NDK selection on the Windows workstation
+
+The workstation already has side-by-side NDK versions `27.0.12077973` and `28.2.13676358`. The project now pins `28.2.13676358`; no additional NDK download is needed locally.
+
+If the pinned NDK is absent on another machine, the build script invokes `sdkmanager` with an explicit `--sdk_root`, avoiding the command-line-tools layout problem seen in the failed local run.
